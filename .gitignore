@@ -1,0 +1,27 @@
+# Build output
+main.js
+*.js.map
+
+# Dependencies
+node_modules/
+
+# IDE
+.idea/
+*.sublime-workspace
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NPM
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Obsidian
+data.json

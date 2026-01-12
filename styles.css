@@ -1,0 +1,346 @@
+/* Timeline Viewer Plugin Styles */
+
+/* ==================== Common ==================== */
+.timeline-viewer-container,
+.wbs-viewer-container {
+  padding: 16px;
+  height: 100%;
+  overflow: auto;
+}
+
+/* ==================== Timeline View ==================== */
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.timeline-header h2 {
+  margin: 0;
+}
+
+.timeline-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.timeline-scale-select {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.timeline-content {
+  overflow-x: auto;
+}
+
+.timeline-grid {
+  display: grid;
+  grid-template-columns: 200px repeat(12, 1fr);
+  gap: 1px;
+  background: var(--background-modifier-border);
+  min-width: 800px;
+}
+
+.timeline-header-row {
+  display: contents;
+}
+
+.timeline-header-row > div {
+  background: var(--background-secondary);
+  padding: 8px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.timeline-label-cell {
+  background: var(--background-primary);
+  padding: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-date-cell {
+  background: var(--background-primary);
+  padding: 8px;
+  text-align: center;
+  font-size: 0.85em;
+}
+
+.timeline-row {
+  display: contents;
+}
+
+.timeline-row-project .timeline-label-cell {
+  font-weight: 600;
+}
+
+.timeline-row-task .timeline-label-cell {
+  padding-left: 24px;
+}
+
+.timeline-item-title {
+  cursor: pointer;
+}
+
+.timeline-item-title:hover {
+  color: var(--text-accent);
+}
+
+.timeline-bar-area {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  background: var(--background-primary);
+  padding: 4px 0;
+}
+
+.timeline-bar {
+  height: 24px;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.timeline-bar-not-started {
+  background: var(--background-modifier-border);
+}
+
+.timeline-bar-in-progress {
+  background: var(--interactive-accent);
+}
+
+.timeline-bar-completed {
+  background: var(--color-green);
+}
+
+.timeline-bar-on-hold {
+  background: var(--color-yellow);
+}
+
+.timeline-bar-cancelled {
+  background: var(--color-red);
+  opacity: 0.5;
+}
+
+.timeline-bar-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px 0 0 4px;
+}
+
+.timeline-empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--text-muted);
+}
+
+.timeline-empty-state button {
+  margin-top: 16px;
+}
+
+/* ==================== WBS View ==================== */
+.wbs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.wbs-header h2 {
+  margin: 0;
+}
+
+.wbs-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.wbs-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.wbs-btn:hover {
+  background: var(--background-secondary);
+}
+
+.wbs-btn.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.wbs-tree {
+  font-family: var(--font-monospace);
+}
+
+.wbs-node {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 4px;
+  gap: 8px;
+}
+
+.wbs-node:hover {
+  background: var(--background-secondary);
+}
+
+.wbs-toggle {
+  width: 16px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.wbs-toggle:hover {
+  color: var(--text-normal);
+}
+
+.wbs-toggle-leaf {
+  cursor: default;
+}
+
+.wbs-icon {
+  width: 20px;
+  text-align: center;
+}
+
+.wbs-title {
+  flex: 1;
+  cursor: pointer;
+}
+
+.wbs-title:hover {
+  color: var(--text-accent);
+}
+
+.wbs-progress-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100px;
+}
+
+.wbs-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.wbs-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.wbs-progress-text {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  width: 32px;
+  text-align: right;
+}
+
+.wbs-status {
+  width: 20px;
+  text-align: center;
+}
+
+.wbs-status-not-started {
+  color: var(--text-muted);
+}
+
+.wbs-status-in-progress {
+  color: var(--interactive-accent);
+}
+
+.wbs-status-completed {
+  color: var(--color-green);
+}
+
+.wbs-status-on-hold {
+  color: var(--color-yellow);
+}
+
+.wbs-status-cancelled {
+  color: var(--color-red);
+}
+
+.wbs-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.wbs-node:hover .wbs-actions {
+  opacity: 1;
+}
+
+.wbs-action-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.wbs-action-btn:hover {
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.wbs-children {
+  margin-left: 0;
+}
+
+.wbs-empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--text-muted);
+}
+
+.wbs-empty-state button {
+  margin-top: 16px;
+}
+
+/* Node type colors */
+.wbs-node-goal {
+  border-left: 3px solid var(--color-purple);
+}
+
+.wbs-node-portfolio {
+  border-left: 3px solid var(--color-blue);
+}
+
+.wbs-node-project {
+  border-left: 3px solid var(--color-green);
+}
+
+.wbs-node-task {
+  border-left: 3px solid var(--color-orange);
+}
+
+/* ==================== Modal Styles ==================== */
+.modal-content h2 {
+  margin-top: 0;
+}
