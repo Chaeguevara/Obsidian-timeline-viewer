@@ -173,6 +173,13 @@ export default class TimelineViewerPlugin extends Plugin {
       await this.app.workspace.getLeaf().openFile(file as import('obsidian').TFile);
     }
   }
+
+  /**
+   * Edit an entity (opens file in edit mode)
+   */
+  async editEntity(id: string): Promise<void> {
+    await this.openEntity(id);
+  }
 }
 
 /**

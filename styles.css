@@ -1,11 +1,28 @@
 /* Timeline Viewer Plugin Styles */
+/* Optimized for iPhone 15 Pro (393x852pt logical) */
+
+/* ==================== CSS Variables ==================== */
+:root {
+  --tv-touch-target: 44px;
+  --tv-spacing-xs: 4px;
+  --tv-spacing-sm: 8px;
+  --tv-spacing-md: 12px;
+  --tv-spacing-lg: 16px;
+  --tv-spacing-xl: 24px;
+  --tv-font-size-sm: 14px;
+  --tv-font-size-md: 16px;
+  --tv-font-size-lg: 18px;
+  --tv-border-radius: 8px;
+  --tv-transition: 0.2s ease;
+}
 
 /* ==================== Common ==================== */
 .timeline-viewer-container,
 .wbs-viewer-container {
-  padding: 16px;
+  padding: var(--tv-spacing-lg);
   height: 100%;
   overflow: auto;
+  -webkit-overflow-scrolling: touch; /* Smooth iOS scrolling */
 }
 
 /* ==================== Timeline View ==================== */
@@ -13,38 +30,62 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 8px;
+  margin-bottom: var(--tv-spacing-lg);
+  padding-bottom: var(--tv-spacing-sm);
   border-bottom: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+  gap: var(--tv-spacing-sm);
 }
 
 .timeline-header h2 {
   margin: 0;
+  font-size: var(--tv-font-size-lg);
 }
 
 .timeline-controls {
   display: flex;
-  gap: 8px;
+  gap: var(--tv-spacing-sm);
+  flex-wrap: wrap;
 }
 
 .timeline-scale-select {
-  padding: 4px 8px;
-  border-radius: 4px;
+  min-height: var(--tv-touch-target);
+  padding: var(--tv-spacing-sm) var(--tv-spacing-md);
+  border-radius: var(--tv-border-radius);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-normal);
+  font-size: var(--tv-font-size-md);
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .timeline-content {
   overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+
+/* Touch hint for scrollable area */
+.timeline-content::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  background: linear-gradient(to right, transparent, var(--background-primary));
+  pointer-events: none;
+  opacity: 0.5;
 }
 
 .timeline-grid {
   display: grid;
-  grid-template-columns: 200px repeat(12, 1fr);
+  grid-template-columns: 150px repeat(12, minmax(60px, 1fr));
   gap: 1px;
   background: var(--background-modifier-border);
-  min-width: 800px;
+  min-width: 600px;
 }
 
 .timeline-header-row {
@@ -53,24 +94,29 @@
 
 .timeline-header-row > div {
   background: var(--background-secondary);
-  padding: 8px;
+  padding: var(--tv-spacing-sm);
   font-weight: 600;
   text-align: center;
+  font-size: var(--tv-font-size-sm);
 }
 
 .timeline-label-cell {
   background: var(--background-primary);
-  padding: 8px;
+  padding: var(--tv-spacing-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-height: var(--tv-touch-target);
+  display: flex;
+  align-items: center;
+  font-size: var(--tv-font-size-md);
 }
 
 .timeline-date-cell {
   background: var(--background-primary);
-  padding: 8px;
+  padding: var(--tv-spacing-sm);
   text-align: center;
-  font-size: 0.85em;
+  font-size: var(--tv-font-size-sm);
 }
 
 .timeline-row {
@@ -82,14 +128,15 @@
 }
 
 .timeline-row-task .timeline-label-cell {
-  padding-left: 24px;
+  padding-left: var(--tv-spacing-lg);
 }
 
 .timeline-item-title {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.timeline-item-title:hover {
+.timeline-item-title:active {
   color: var(--text-accent);
 }
 
@@ -98,15 +145,23 @@
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   background: var(--background-primary);
-  padding: 4px 0;
+  padding: var(--tv-spacing-xs) 0;
+  min-height: var(--tv-touch-target);
+  align-items: center;
 }
 
 .timeline-bar {
-  height: 24px;
-  border-radius: 4px;
+  height: 32px;
+  border-radius: var(--tv-border-radius);
   position: relative;
   overflow: hidden;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--tv-transition);
+}
+
+.timeline-bar:active {
+  transform: scale(0.98);
 }
 
 .timeline-bar-not-started {
@@ -136,17 +191,25 @@
   left: 0;
   height: 100%;
   background: rgba(255, 255, 255, 0.3);
-  border-radius: 4px 0 0 4px;
+  border-radius: var(--tv-border-radius) 0 0 var(--tv-border-radius);
 }
 
 .timeline-empty-state {
   text-align: center;
-  padding: 48px;
+  padding: var(--tv-spacing-xl);
   color: var(--text-muted);
 }
 
+.timeline-empty-state p {
+  font-size: var(--tv-font-size-md);
+  margin-bottom: var(--tv-spacing-md);
+}
+
 .timeline-empty-state button {
-  margin-top: 16px;
+  margin-top: var(--tv-spacing-lg);
+  min-height: var(--tv-touch-target);
+  min-width: 120px;
+  font-size: var(--tv-font-size-md);
 }
 
 /* ==================== WBS View ==================== */
@@ -154,30 +217,39 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 8px;
+  margin-bottom: var(--tv-spacing-lg);
+  padding-bottom: var(--tv-spacing-sm);
   border-bottom: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+  gap: var(--tv-spacing-sm);
 }
 
 .wbs-header h2 {
   margin: 0;
+  font-size: var(--tv-font-size-lg);
 }
 
 .wbs-controls {
   display: flex;
-  gap: 8px;
+  gap: var(--tv-spacing-sm);
+  flex-wrap: wrap;
 }
 
 .wbs-btn {
-  padding: 4px 12px;
-  border-radius: 4px;
+  min-height: var(--tv-touch-target);
+  padding: var(--tv-spacing-sm) var(--tv-spacing-md);
+  border-radius: var(--tv-border-radius);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-normal);
   cursor: pointer;
+  font-size: var(--tv-font-size-md);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--tv-transition), background var(--tv-transition);
 }
 
-.wbs-btn:hover {
+.wbs-btn:active {
+  transform: scale(0.96);
   background: var(--background-secondary);
 }
 
@@ -187,31 +259,45 @@
   border-color: var(--interactive-accent);
 }
 
+.wbs-btn.mod-cta:active {
+  background: var(--interactive-accent-hover);
+}
+
 .wbs-tree {
-  font-family: var(--font-monospace);
+  font-family: var(--font-text);
 }
 
 .wbs-node {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: 4px;
-  gap: 8px;
+  padding: var(--tv-spacing-md) var(--tv-spacing-sm);
+  border-radius: var(--tv-border-radius);
+  gap: var(--tv-spacing-sm);
+  min-height: var(--tv-touch-target);
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--tv-transition);
 }
 
-.wbs-node:hover {
+.wbs-node:active {
   background: var(--background-secondary);
 }
 
 .wbs-toggle {
-  width: 16px;
-  text-align: center;
+  width: var(--tv-touch-target);
+  height: var(--tv-touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   color: var(--text-muted);
   user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  border-radius: var(--tv-border-radius);
+  font-size: var(--tv-font-size-md);
 }
 
-.wbs-toggle:hover {
+.wbs-toggle:active {
+  background: var(--background-modifier-border);
   color: var(--text-normal);
 }
 
@@ -220,31 +306,35 @@
 }
 
 .wbs-icon {
-  width: 20px;
+  width: 24px;
   text-align: center;
+  font-size: var(--tv-font-size-lg);
 }
 
 .wbs-title {
   flex: 1;
   cursor: pointer;
+  font-size: var(--tv-font-size-md);
+  padding: var(--tv-spacing-xs) 0;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.wbs-title:hover {
+.wbs-title:active {
   color: var(--text-accent);
 }
 
 .wbs-progress-container {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100px;
+  gap: var(--tv-spacing-sm);
+  min-width: 80px;
 }
 
 .wbs-progress-bar {
   flex: 1;
-  height: 6px;
+  height: 8px;
   background: var(--background-modifier-border);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
@@ -252,20 +342,21 @@
   display: block;
   height: 100%;
   background: var(--interactive-accent);
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.3s ease;
 }
 
 .wbs-progress-text {
-  font-size: 0.75em;
+  font-size: var(--tv-font-size-sm);
   color: var(--text-muted);
-  width: 32px;
+  min-width: 36px;
   text-align: right;
 }
 
 .wbs-status {
-  width: 20px;
+  width: 24px;
   text-align: center;
+  font-size: var(--tv-font-size-md);
 }
 
 .wbs-status-not-started {
@@ -289,22 +380,24 @@
 }
 
 .wbs-actions {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.wbs-node:hover .wbs-actions {
-  opacity: 1;
+  display: flex;
+  gap: var(--tv-spacing-xs);
 }
 
 .wbs-action-btn {
-  padding: 2px 8px;
-  border-radius: 4px;
+  width: var(--tv-touch-target);
+  height: var(--tv-touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--tv-border-radius);
   cursor: pointer;
   color: var(--text-muted);
+  font-size: var(--tv-font-size-lg);
+  -webkit-tap-highlight-color: transparent;
 }
 
-.wbs-action-btn:hover {
+.wbs-action-btn:active {
   background: var(--background-modifier-border);
   color: var(--text-normal);
 }
@@ -315,32 +408,303 @@
 
 .wbs-empty-state {
   text-align: center;
-  padding: 48px;
+  padding: var(--tv-spacing-xl);
   color: var(--text-muted);
 }
 
-.wbs-empty-state button {
-  margin-top: 16px;
+.wbs-empty-state p {
+  font-size: var(--tv-font-size-md);
+  margin-bottom: var(--tv-spacing-md);
 }
 
-/* Node type colors */
+.wbs-empty-state button {
+  margin-top: var(--tv-spacing-lg);
+  min-height: var(--tv-touch-target);
+  min-width: 140px;
+  font-size: var(--tv-font-size-md);
+}
+
+/* Node type colors - thicker borders for visibility */
 .wbs-node-goal {
-  border-left: 3px solid var(--color-purple);
+  border-left: 4px solid var(--color-purple);
 }
 
 .wbs-node-portfolio {
-  border-left: 3px solid var(--color-blue);
+  border-left: 4px solid var(--color-blue);
 }
 
 .wbs-node-project {
-  border-left: 3px solid var(--color-green);
+  border-left: 4px solid var(--color-green);
 }
 
 .wbs-node-task {
-  border-left: 3px solid var(--color-orange);
+  border-left: 4px solid var(--color-orange);
 }
 
 /* ==================== Modal Styles ==================== */
 .modal-content h2 {
   margin-top: 0;
+  font-size: var(--tv-font-size-lg);
+}
+
+/* ==================== Mobile Optimizations ==================== */
+/* iPhone 15 Pro: 393pt width */
+@media screen and (max-width: 480px) {
+  :root {
+    --tv-touch-target: 48px; /* Larger touch targets on mobile */
+    --tv-spacing-lg: 12px;
+  }
+
+  .timeline-viewer-container,
+  .wbs-viewer-container {
+    padding: var(--tv-spacing-md);
+    /* Account for safe areas (Dynamic Island, home indicator) */
+    padding-top: max(var(--tv-spacing-md), env(safe-area-inset-top));
+    padding-bottom: max(var(--tv-spacing-md), env(safe-area-inset-bottom));
+    padding-left: max(var(--tv-spacing-md), env(safe-area-inset-left));
+    padding-right: max(var(--tv-spacing-md), env(safe-area-inset-right));
+  }
+
+  /* Timeline mobile adjustments */
+  .timeline-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .timeline-header h2 {
+    text-align: center;
+    margin-bottom: var(--tv-spacing-sm);
+  }
+
+  .timeline-controls {
+    justify-content: center;
+  }
+
+  .timeline-grid {
+    grid-template-columns: 120px repeat(7, minmax(50px, 1fr));
+    min-width: 500px;
+  }
+
+  .timeline-label-cell {
+    font-size: var(--tv-font-size-sm);
+    padding: var(--tv-spacing-sm) var(--tv-spacing-xs);
+  }
+
+  .timeline-bar {
+    height: 36px; /* Easier to tap */
+  }
+
+  /* WBS mobile adjustments */
+  .wbs-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wbs-header h2 {
+    text-align: center;
+    margin-bottom: var(--tv-spacing-sm);
+  }
+
+  .wbs-controls {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .wbs-btn {
+    flex: 1;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  .wbs-node {
+    padding: var(--tv-spacing-md) var(--tv-spacing-xs);
+    gap: var(--tv-spacing-xs);
+  }
+
+  /* Show actions always on mobile (no hover) */
+  .wbs-actions {
+    opacity: 1;
+  }
+
+  .wbs-progress-container {
+    min-width: 60px;
+  }
+
+  .wbs-progress-text {
+    display: none; /* Hide text, show only bar on small screens */
+  }
+
+  /* Larger depth indentation for clarity */
+  .wbs-depth-0 { padding-left: 0 !important; }
+  .wbs-depth-1 { padding-left: 16px !important; }
+  .wbs-depth-2 { padding-left: 32px !important; }
+  .wbs-depth-3 { padding-left: 48px !important; }
+
+  /* Modal adjustments */
+  .modal {
+    width: 95vw !important;
+    max-width: none !important;
+  }
+
+  .modal-content {
+    padding: var(--tv-spacing-lg);
+  }
+
+  .modal-content input,
+  .modal-content select,
+  .modal-content textarea {
+    min-height: var(--tv-touch-target);
+    font-size: var(--tv-font-size-md);
+    padding: var(--tv-spacing-sm) var(--tv-spacing-md);
+  }
+
+  .modal-content button {
+    min-height: var(--tv-touch-target);
+    font-size: var(--tv-font-size-md);
+    width: 100%;
+    margin-top: var(--tv-spacing-sm);
+  }
+}
+
+/* Landscape mode on mobile */
+@media screen and (max-width: 896px) and (orientation: landscape) {
+  .timeline-viewer-container,
+  .wbs-viewer-container {
+    padding: var(--tv-spacing-sm);
+    padding-left: max(var(--tv-spacing-sm), env(safe-area-inset-left));
+    padding-right: max(var(--tv-spacing-sm), env(safe-area-inset-right));
+  }
+
+  .timeline-header,
+  .wbs-header {
+    flex-direction: row;
+    margin-bottom: var(--tv-spacing-sm);
+    padding-bottom: var(--tv-spacing-xs);
+  }
+
+  .wbs-node {
+    min-height: 40px;
+    padding: var(--tv-spacing-sm) var(--tv-spacing-xs);
+  }
+}
+
+/* ==================== Touch Gestures Feedback ==================== */
+/* Ripple effect for touch feedback */
+.tv-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.tv-ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: var(--text-accent);
+  opacity: 0.3;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.3s ease, height 0.3s ease, opacity 0.3s ease;
+}
+
+.tv-ripple:active::after {
+  width: 200%;
+  height: 200%;
+  opacity: 0;
+}
+
+/* ==================== Swipe Indicators ==================== */
+.timeline-swipe-hint {
+  display: none;
+  text-align: center;
+  padding: var(--tv-spacing-sm);
+  color: var(--text-muted);
+  font-size: var(--tv-font-size-sm);
+}
+
+@media screen and (max-width: 480px) {
+  .timeline-swipe-hint {
+    display: block;
+  }
+}
+
+/* ==================== Pull to Refresh Indicator ==================== */
+.tv-pull-indicator {
+  text-align: center;
+  padding: var(--tv-spacing-md);
+  color: var(--text-muted);
+  font-size: var(--tv-font-size-sm);
+  transform: translateY(-100%);
+  transition: transform var(--tv-transition);
+}
+
+.tv-pull-indicator.visible {
+  transform: translateY(0);
+}
+
+/* ==================== Floating Action Button (FAB) ==================== */
+.tv-fab {
+  position: fixed;
+  bottom: calc(var(--tv-spacing-xl) + env(safe-area-inset-bottom, 0px));
+  right: var(--tv-spacing-lg);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--tv-transition), box-shadow var(--tv-transition);
+  z-index: 100;
+}
+
+.tv-fab:active {
+  transform: scale(0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Hide FAB on desktop */
+@media screen and (min-width: 481px) {
+  .tv-fab {
+    display: none;
+  }
+}
+
+/* ==================== Accessibility ==================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  .wbs-node-goal { border-left-width: 6px; }
+  .wbs-node-portfolio { border-left-width: 6px; }
+  .wbs-node-project { border-left-width: 6px; }
+  .wbs-node-task { border-left-width: 6px; }
+
+  .timeline-bar {
+    border: 2px solid var(--text-normal);
+  }
+}
+
+/* Dark mode adjustments */
+.theme-dark {
+  --tv-shadow-color: rgba(0, 0, 0, 0.5);
+}
+
+.theme-light {
+  --tv-shadow-color: rgba(0, 0, 0, 0.15);
 }
