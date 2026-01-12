@@ -1,0 +1,10 @@
+{
+  "id": "timeline-viewer",
+  "name": "Timeline Viewer",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "Project management with timeline visualization and WBS structure. Organize goals, portfolios, projects, and tasks with Gantt chart views.",
+  "author": "Chaeguevara",
+  "authorUrl": "https://github.com/Chaeguevara",
+  "isDesktopOnly": false
+}
