@@ -2,19 +2,42 @@ import { Plugin, Modal, Setting } from 'obsidian';
 import { TimelineViewerSettings, DEFAULT_SETTINGS, TimelineViewerSettingTab } from './settings';
 import { TimelineView, TIMELINE_VIEW_TYPE } from './views/TimelineView';
 import { WBSView, WBS_VIEW_TYPE } from './views/WBSView';
+import { DependencyGraphView, DEPENDENCY_GRAPH_VIEW_TYPE } from './views/DependencyGraphView';
 import { DataService } from './services/DataService';
 import type { EntityType } from './models/types';
+import { Logger } from './utils/Logger';
 
 export default class TimelineViewerPlugin extends Plugin {
   settings: TimelineViewerSettings;
   dataService: DataService;
 
   async onload(): Promise<void> {
+    Logger.info('TimelineViewerPlugin.onload() - START');
     await this.loadSettings();
 
     // Initialize data service
+    Logger.info('Initializing DataService...');
     this.dataService = new DataService(this.app, this.settings);
+
+    // Wait for layout to be ready before initializing data
+    // This ensures the metadata cache is populated
+    this.app.workspace.onLayoutReady(async () => {
+      Logger.info('Layout ready - initializing data...');
+      await this.dataService.initialize();
+      Logger.success('DataService initialized after layout ready');
+
+      // Also listen for metadata cache resolution for late-loading files
+      this.registerEvent(
+        this.app.metadataCache.on('resolved', async () => {
+          Logger.debug('Metadata cache resolved - refreshing cache');
+          await this.dataService.refreshCache();
+        })
+      );
+    });
+
+    // Initial quick init (may be incomplete if metadata not ready)
     await this.dataService.initialize();
+    Logger.success('DataService initial load complete');
 
     // Register views
     this.registerView(
@@ -27,6 +50,11 @@ export default class TimelineViewerPlugin extends Plugin {
       (leaf) => new WBSView(leaf, this)
     );
 
+    this.registerView(
+      DEPENDENCY_GRAPH_VIEW_TYPE,
+      (leaf) => new DependencyGraphView(leaf, this)
+    );
+
     // Add ribbon icons
     this.addRibbonIcon('gantt-chart', 'Open Timeline View', () => {
       this.activateView(TIMELINE_VIEW_TYPE);
@@ -34,6 +62,10 @@ export default class TimelineViewerPlugin extends Plugin {
 
     this.addRibbonIcon('list-tree', 'Open WBS View', () => {
       this.activateView(WBS_VIEW_TYPE);
+    });
+
+    this.addRibbonIcon('git-branch', 'Open Dependency Graph', () => {
+      this.activateView(DEPENDENCY_GRAPH_VIEW_TYPE);
     });
 
     // Add commands
@@ -47,6 +79,12 @@ export default class TimelineViewerPlugin extends Plugin {
       id: 'open-wbs-view',
       name: 'Open WBS View',
       callback: () => this.activateView(WBS_VIEW_TYPE),
+    });
+
+    this.addCommand({
+      id: 'open-dependency-graph',
+      name: 'Open Dependency Graph',
+      callback: () => this.activateView(DEPENDENCY_GRAPH_VIEW_TYPE),
     });
 
     this.addCommand({
@@ -87,22 +125,27 @@ export default class TimelineViewerPlugin extends Plugin {
 
     // Register file events for auto-refresh
     this.registerEvent(
-      this.app.vault.on('modify', () => {
+      this.app.vault.on('modify', (file) => {
+        Logger.debug(`File modified: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
 
     this.registerEvent(
-      this.app.vault.on('create', () => {
+      this.app.vault.on('create', (file) => {
+        Logger.debug(`File created: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
 
     this.registerEvent(
-      this.app.vault.on('delete', () => {
+      this.app.vault.on('delete', (file) => {
+        Logger.debug(`File deleted: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
+
+    Logger.success('TimelineViewerPlugin.onload() - END');
   }
 
   onunload(): void {
@@ -139,23 +182,29 @@ export default class TimelineViewerPlugin extends Plugin {
   }
 
   async refreshViews(): Promise<void> {
+    Logger.info('refreshViews() - START');
     // Refresh timeline view
     const timelineLeaves = this.app.workspace.getLeavesOfType(TIMELINE_VIEW_TYPE);
+    Logger.debug(`refreshViews() - Found ${timelineLeaves.length} timeline views`);
     for (const leaf of timelineLeaves) {
       const view = leaf.view;
       if (view instanceof TimelineView) {
+        Logger.debug('refreshViews() - Rendering timeline view...');
         await view.render();
       }
     }
 
     // Refresh WBS view
     const wbsLeaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
+    Logger.debug(`refreshViews() - Found ${wbsLeaves.length} WBS views`);
     for (const leaf of wbsLeaves) {
       const view = leaf.view;
       if (view instanceof WBSView) {
+        Logger.debug('refreshViews() - Rendering WBS view...');
         await view.render();
       }
     }
+    Logger.success('refreshViews() - END');
   }
 
   /**
@@ -262,15 +311,21 @@ class CreateEntityModal extends Modal {
 
   async create(): Promise<void> {
     if (!this.title.trim()) {
+      Logger.warn('CreateEntityModal.create() - Empty title, aborting');
       return;
     }
 
+    Logger.info(`CreateEntityModal.create() - Creating ${this.type}: "${this.title.trim()}"`);
     try {
-      await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
+      const entity = await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
+      Logger.success(`CreateEntityModal.create() - Entity created: ${entity?.id || 'unknown'}`);
+      Logger.info('CreateEntityModal.create() - Refreshing views...');
       await this.plugin.refreshViews();
+      Logger.success('CreateEntityModal.create() - Views refreshed');
       this.close();
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Failed to create entity';
+      Logger.error(`CreateEntityModal.create() - Failed: ${errorMsg}`, error);
       const { contentEl } = this;
 
       // Show error message
@@ -281,8 +336,6 @@ class CreateEntityModal extends Modal {
 
       const errorEl = contentEl.createDiv({ cls: 'timeline-error' });
       errorEl.createEl('p', { text: errorMsg, cls: 'mod-warning' });
-
-      console.error(`Failed to create ${this.type}:`, error);
     }
   }
 

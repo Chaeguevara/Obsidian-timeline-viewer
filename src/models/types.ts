@@ -99,6 +99,7 @@ export interface TimelineItem {
   endDate: Date;
   progress: number;
   status: Status;
+  projectId?: string;  // Parent project ID for tasks
   children?: TimelineItem[];
 }
 

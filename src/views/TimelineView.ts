@@ -1,27 +1,26 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import type TimelineViewerPlugin from '../main';
-import type { TimelineItem, Task, Project } from '../models/types';
+import type { TimelineItem, Task } from '../models/types';
+import { Logger } from '../utils/Logger';
 
 export const TIMELINE_VIEW_TYPE = 'timeline-viewer-timeline';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const SNAP_MINUTES = 15; // Snap to 15-minute intervals
-const HOUR_HEIGHT = 48; // pixels per hour
+const SNAP_MINUTES = 15;
+const HOUR_HEIGHT = 48;
 const TIME_COLUMN_WIDTH = 60;
+const DAY_WIDTH_MONTH = 30;
+const DAY_WIDTH_YEAR = 4;
+
+// Time scale types
+type TimeScale = 'day' | '3days' | 'week' | 'month' | 'year' | 'timeline' | 'swimlane';
 
 // Project color palette
 const PROJECT_COLORS = [
-  '#FF6B6B', // Red
-  '#4ECDC4', // Teal
-  '#45B7D1', // Blue
-  '#96CEB4', // Green
-  '#FFEAA7', // Yellow
-  '#DDA0DD', // Plum
-  '#98D8C8', // Mint
-  '#F7DC6F', // Gold
-  '#BB8FCE', // Purple
-  '#85C1E9', // Light Blue
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+  '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
 ];
 
 interface DayColumn {
@@ -29,18 +28,14 @@ interface DayColumn {
   dayName: string;
   dayNumber: number;
   isToday: boolean;
-}
-
-interface ProjectInfo {
-  id: string;
-  title: string;
-  color: string;
+  monthName?: string;
 }
 
 export class TimelineView extends ItemView {
   plugin: TimelineViewerPlugin;
   private viewContentEl: HTMLElement;
-  private currentWeekStart: Date;
+  private currentDate: Date;
+  private currentScale: TimeScale = 'week';
   private taskElements: Map<string, HTMLElement> = new Map();
   private svgLayer: SVGSVGElement | null = null;
   private projectColors: Map<string, string> = new Map();
@@ -64,7 +59,7 @@ export class TimelineView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: TimelineViewerPlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.currentWeekStart = this.getWeekStart(new Date());
+    this.currentDate = new Date();
   }
 
   getViewType(): string {
@@ -80,15 +75,20 @@ export class TimelineView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    Logger.info('TimelineView.onOpen() - START');
     this.viewContentEl = this.containerEl.children[1] as HTMLElement;
     this.viewContentEl.empty();
     this.viewContentEl.addClass('timeline-viewer-container');
 
-    // Add global mouse handlers
     this.registerDomEvent(document, 'mousemove', this.handleGlobalMouseMove.bind(this));
     this.registerDomEvent(document, 'mouseup', this.handleGlobalMouseUp.bind(this));
 
+    // Refresh data cache before rendering to ensure we have latest data
+    Logger.debug('TimelineView.onOpen() - Refreshing data cache...');
+    await this.plugin.dataService.refreshCache();
+
     await this.render();
+    Logger.success('TimelineView.onOpen() - END');
   }
 
   async onClose(): Promise<void> {
@@ -96,126 +96,498 @@ export class TimelineView extends ItemView {
   }
 
   async render(): Promise<void> {
+    Logger.info(`TimelineView.render() - START (scale: ${this.currentScale})`);
     this.viewContentEl.empty();
     this.taskElements.clear();
     this.projectColors.clear();
 
-    // Build project color mapping
     this.buildProjectColors();
-
-    // Header with navigation
     this.renderHeader();
 
-    // Main container with legend
     const mainContainer = this.viewContentEl.createDiv({ cls: 'week-main-container' });
-
-    // Week calendar container
     const calendarContainer = mainContainer.createDiv({ cls: 'week-calendar' });
 
-    // SVG layer for dependency lines
     this.svgLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     this.svgLayer.addClass('dependency-svg-layer');
     calendarContainer.appendChild(this.svgLayer);
 
-    // Render the week calendar
-    this.renderWeekCalendar(calendarContainer);
+    // Render based on current scale
+    switch (this.currentScale) {
+      case 'day':
+        this.renderDayView(calendarContainer);
+        break;
+      case '3days':
+        this.render3DaysView(calendarContainer);
+        break;
+      case 'week':
+        this.renderWeekView(calendarContainer);
+        break;
+      case 'month':
+        this.renderMonthView(calendarContainer);
+        break;
+      case 'year':
+        this.renderYearView(calendarContainer);
+        break;
+      case 'timeline':
+        this.renderTimelineView(calendarContainer);
+        break;
+    }
 
-    // Render project legend
     this.renderLegend(mainContainer);
-
-    // Render dependency lines after tasks are positioned
     setTimeout(() => this.renderDependencyLines(), 100);
+    Logger.success(`TimelineView.render() - END (taskElements: ${this.taskElements.size})`);
+  }
+
+  private async renderPreservingScroll(): Promise<void> {
+    const scrollWrapper = this.viewContentEl.querySelector('.week-timegrid-wrapper') as HTMLElement | null;
+    const savedScrollTop = scrollWrapper?.scrollTop ?? 0;
+    const savedScrollLeft = scrollWrapper?.scrollLeft ?? 0;
+
+    await this.render();
+
+    const newScrollWrapper = this.viewContentEl.querySelector('.week-timegrid-wrapper') as HTMLElement | null;
+    if (newScrollWrapper) {
+      newScrollWrapper.scrollTop = savedScrollTop;
+      newScrollWrapper.scrollLeft = savedScrollLeft;
+    }
   }
 
   private buildProjectColors(): void {
+    Logger.info('buildProjectColors() - START');
     const items = this.plugin.dataService.getTimelineItems();
+    Logger.debug(`buildProjectColors() - Got ${items.length} timeline items`);
     let colorIndex = 0;
-
     items.forEach(item => {
+      Logger.debug(`buildProjectColors() - Item: "${item.title}" (type: ${item.type}, children: ${item.children?.length || 0})`);
       if (item.type === 'project') {
         this.projectColors.set(item.id, PROJECT_COLORS[colorIndex % PROJECT_COLORS.length]);
         colorIndex++;
       }
     });
+    Logger.success(`buildProjectColors() - END (${this.projectColors.size} projects)`);
   }
 
   private getTaskColor(task: TimelineItem): string {
-    // Get the task entity to find its project
+    // First try to use projectId from the TimelineItem directly (for child tasks)
+    if (task.projectId) {
+      const color = this.projectColors.get(task.projectId);
+      if (color) {
+        Logger.debug(`getTaskColor() - Task "${task.title}" using projectId ${task.projectId} -> ${color}`);
+        return color;
+      }
+    }
+    // Fallback: lookup from cache
     const taskEntity = this.plugin.dataService.getEntity(task.id) as Task | undefined;
     if (taskEntity?.projectId) {
-      return this.projectColors.get(taskEntity.projectId) || 'var(--interactive-accent)';
+      const color = this.projectColors.get(taskEntity.projectId);
+      if (color) {
+        Logger.debug(`getTaskColor() - Task "${task.title}" using cached projectId ${taskEntity.projectId} -> ${color}`);
+        return color;
+      }
     }
+    Logger.debug(`getTaskColor() - Task "${task.title}" using default color`);
     return 'var(--interactive-accent)';
   }
 
   private renderHeader(): void {
     const header = this.viewContentEl.createDiv({ cls: 'timeline-header' });
 
-    // Title
-    header.createEl('h2', { text: 'Week View' });
+    // Title and scale selector row
+    const titleRow = header.createDiv({ cls: 'timeline-title-row' });
+    titleRow.createEl('h2', { text: 'Timeline' });
+
+    // Scale selector
+    const scaleSelector = titleRow.createDiv({ cls: 'scale-selector' });
+    const scales: { key: TimeScale; label: string }[] = [
+      { key: 'day', label: 'Day' },
+      { key: '3days', label: '3 Days' },
+      { key: 'week', label: 'Week' },
+      { key: 'month', label: 'Month' },
+      { key: 'year', label: 'Year' },
+      { key: 'timeline', label: 'Timeline' },
+    ];
+
+    scales.forEach(scale => {
+      const btn = scaleSelector.createEl('button', {
+        cls: `scale-btn ${this.currentScale === scale.key ? 'is-active' : ''}`,
+        text: scale.label
+      });
+      btn.addEventListener('click', () => this.setScale(scale.key));
+    });
 
     // Navigation controls
     const nav = header.createDiv({ cls: 'week-nav' });
 
-    // Previous week button
     const prevBtn = nav.createEl('button', { cls: 'week-nav-btn', text: '‹' });
-    prevBtn.setAttribute('aria-label', 'Previous week');
-    prevBtn.addEventListener('click', () => this.navigateWeek(-1));
-
-    // Date range display
-    const weekEnd = new Date(this.currentWeekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
+    prevBtn.setAttribute('aria-label', 'Previous');
+    prevBtn.addEventListener('click', () => this.navigate(-1));
 
     const dateRange = nav.createDiv({ cls: 'week-date-range' });
-    dateRange.setText(this.formatDateRange(this.currentWeekStart, weekEnd));
+    dateRange.setText(this.getDateRangeText());
 
-    // Today button
     const todayBtn = nav.createEl('button', { cls: 'week-nav-btn week-today-btn', text: 'Today' });
     todayBtn.addEventListener('click', () => this.goToToday());
 
-    // Next week button
     const nextBtn = nav.createEl('button', { cls: 'week-nav-btn', text: '›' });
-    nextBtn.setAttribute('aria-label', 'Next week');
-    nextBtn.addEventListener('click', () => this.navigateWeek(1));
+    nextBtn.setAttribute('aria-label', 'Next');
+    nextBtn.addEventListener('click', () => this.navigate(1));
 
-    // Add task button
-    const addBtn = header.createEl('button', { cls: 'week-add-btn mod-cta', text: '+ New Task' });
-    addBtn.addEventListener('click', () => this.plugin.createNewEntity('task'));
+    // Action buttons - always show both
+    const actionBtns = header.createDiv({ cls: 'timeline-action-btns' });
+
+    const addProjectBtn = actionBtns.createEl('button', { cls: 'mod-cta', text: '+ Project' });
+    addProjectBtn.addEventListener('click', () => this.plugin.createNewEntity('project'));
+
+    const addTaskBtn = actionBtns.createEl('button', { cls: 'week-add-btn', text: '+ Task' });
+    addTaskBtn.addEventListener('click', () => this.plugin.createNewEntity('task'));
   }
 
-  private renderLegend(container: HTMLElement): void {
-    const legend = container.createDiv({ cls: 'week-legend' });
-    legend.createEl('h4', { text: 'Projects' });
+  private setScale(scale: TimeScale): void {
+    this.currentScale = scale;
+    this.render();
+  }
+
+  private navigate(direction: number): void {
+    switch (this.currentScale) {
+      case 'day':
+        this.currentDate.setDate(this.currentDate.getDate() + direction);
+        break;
+      case '3days':
+        this.currentDate.setDate(this.currentDate.getDate() + (direction * 3));
+        break;
+      case 'week':
+        this.currentDate.setDate(this.currentDate.getDate() + (direction * 7));
+        break;
+      case 'month':
+        this.currentDate.setMonth(this.currentDate.getMonth() + direction);
+        break;
+      case 'year':
+        this.currentDate.setFullYear(this.currentDate.getFullYear() + direction);
+        break;
+      case 'timeline':
+      case 'swimlane':
+        this.currentDate.setMonth(this.currentDate.getMonth() + (direction * 3));
+        break;
+    }
+    this.render();
+  }
+
+  private goToToday(): void {
+    this.currentDate = new Date();
+    this.render();
+  }
+
+  private getDateRangeText(): string {
+    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+    const optsWithYear: Intl.DateTimeFormatOptions = { ...opts, year: 'numeric' };
+
+    switch (this.currentScale) {
+      case 'day':
+        return this.currentDate.toLocaleDateString('en-US', { weekday: 'long', ...optsWithYear });
+      case '3days': {
+        const end = new Date(this.currentDate);
+        end.setDate(end.getDate() + 2);
+        return `${this.currentDate.toLocaleDateString('en-US', opts)} - ${end.toLocaleDateString('en-US', optsWithYear)}`;
+      }
+      case 'week': {
+        const start = this.getWeekStart(this.currentDate);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        return `${start.toLocaleDateString('en-US', opts)} - ${end.toLocaleDateString('en-US', optsWithYear)}`;
+      }
+      case 'month':
+        return this.currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      case 'year':
+        return String(this.currentDate.getFullYear());
+      case 'timeline':
+        return `${this.currentDate.getFullYear()} Timeline`;
+    }
+  }
+
+  // ==================== DAY VIEW ====================
+  private renderDayView(container: HTMLElement): void {
+    const days = [this.createDayColumn(this.currentDate)];
+    const tasks = this.getTasksForDays(days);
+    this.renderTimeGrid(container, days, tasks, 1);
+  }
+
+  // ==================== 3 DAYS VIEW ====================
+  private render3DaysView(container: HTMLElement): void {
+    const days: DayColumn[] = [];
+    for (let i = 0; i < 3; i++) {
+      const date = new Date(this.currentDate);
+      date.setDate(date.getDate() + i);
+      days.push(this.createDayColumn(date));
+    }
+    const tasks = this.getTasksForDays(days);
+    this.renderTimeGrid(container, days, tasks, 3);
+  }
+
+  // ==================== WEEK VIEW ====================
+  private renderWeekView(container: HTMLElement): void {
+    Logger.info('renderWeekView() - START');
+    const weekStart = this.getWeekStart(this.currentDate);
+    Logger.debug(`renderWeekView() - Week starts on: ${weekStart.toISOString()}`);
+    const days: DayColumn[] = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(weekStart);
+      date.setDate(date.getDate() + i);
+      days.push(this.createDayColumn(date));
+    }
+    const tasks = this.getTasksForDays(days);
+    Logger.debug(`renderWeekView() - Got ${tasks.length} tasks for this week`);
+    this.renderTimeGrid(container, days, tasks, 7);
+    Logger.success('renderWeekView() - END');
+  }
+
+  // ==================== MONTH VIEW ====================
+  private renderMonthView(container: HTMLElement): void {
+    const year = this.currentDate.getFullYear();
+    const month = this.currentDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+
+    const grid = container.createDiv({ cls: 'month-grid' });
+
+    // Header with day names
+    const headerRow = grid.createDiv({ cls: 'month-header-row' });
+    DAY_NAMES.forEach(name => {
+      headerRow.createDiv({ cls: 'month-header-cell', text: name });
+    });
+
+    // Calendar cells
+    const calendarBody = grid.createDiv({ cls: 'month-body' });
+    let currentWeek = calendarBody.createDiv({ cls: 'month-week-row' });
+
+    // Padding for first week
+    const startDayOfWeek = firstDay.getDay();
+    for (let i = 0; i < startDayOfWeek; i++) {
+      currentWeek.createDiv({ cls: 'month-day-cell month-day-empty' });
+    }
 
     const items = this.plugin.dataService.getTimelineItems();
-    const projects = items.filter(item => item.type === 'project');
+    const allTasks = this.getTasksOnly(items);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    if (projects.length === 0) {
-      legend.createDiv({ cls: 'week-legend-empty', text: 'No projects' });
+    for (let day = 1; day <= daysInMonth; day++) {
+      if ((startDayOfWeek + day - 1) % 7 === 0 && day !== 1) {
+        currentWeek = calendarBody.createDiv({ cls: 'month-week-row' });
+      }
+
+      const cellDate = new Date(year, month, day);
+      const isToday = cellDate.getTime() === today.getTime();
+      const cell = currentWeek.createDiv({
+        cls: `month-day-cell ${isToday ? 'is-today' : ''}`
+      });
+
+      cell.createDiv({ cls: 'month-day-number', text: String(day) });
+
+      // Find tasks for this day
+      const dayTasks = allTasks.filter(task => {
+        const taskStart = new Date(task.startDate);
+        taskStart.setHours(0, 0, 0, 0);
+        const taskEnd = new Date(task.endDate);
+        taskEnd.setHours(23, 59, 59, 999);
+        return cellDate >= taskStart && cellDate <= taskEnd;
+      });
+
+      const taskContainer = cell.createDiv({ cls: 'month-day-tasks' });
+      dayTasks.slice(0, 3).forEach(task => {
+        const taskDot = taskContainer.createDiv({ cls: 'month-task-dot' });
+        taskDot.style.backgroundColor = this.getTaskColor(task);
+        taskDot.setAttribute('title', task.title);
+        this.taskElements.set(task.id, taskDot);
+      });
+
+      if (dayTasks.length > 3) {
+        taskContainer.createDiv({ cls: 'month-task-more', text: `+${dayTasks.length - 3}` });
+      }
+    }
+
+    // Empty state
+    if (allTasks.length === 0) {
+      this.renderEmptyState(container);
+    }
+  }
+
+  // ==================== YEAR VIEW ====================
+  private renderYearView(container: HTMLElement): void {
+    const year = this.currentDate.getFullYear();
+    const grid = container.createDiv({ cls: 'year-grid' });
+
+    const items = this.plugin.dataService.getTimelineItems();
+    const allTasks = this.getTasksOnly(items);
+
+    for (let month = 0; month < 12; month++) {
+      const monthCard = grid.createDiv({ cls: 'year-month-card' });
+      monthCard.createDiv({ cls: 'year-month-name', text: MONTH_NAMES[month] });
+
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const miniCal = monthCard.createDiv({ cls: 'year-mini-calendar' });
+
+      // Mini calendar header
+      const miniHeader = miniCal.createDiv({ cls: 'year-mini-header' });
+      ['S', 'M', 'T', 'W', 'T', 'F', 'S'].forEach(d => {
+        miniHeader.createDiv({ cls: 'year-mini-day-name', text: d });
+      });
+
+      // Days
+      const firstDayOfWeek = new Date(year, month, 1).getDay();
+      const daysContainer = miniCal.createDiv({ cls: 'year-mini-days' });
+
+      for (let i = 0; i < firstDayOfWeek; i++) {
+        daysContainer.createDiv({ cls: 'year-mini-day year-mini-day-empty' });
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const cellDate = new Date(year, month, day);
+        const isToday = cellDate.getTime() === today.getTime();
+
+        const hasTask = allTasks.some(task => {
+          const taskStart = new Date(task.startDate);
+          taskStart.setHours(0, 0, 0, 0);
+          const taskEnd = new Date(task.endDate);
+          taskEnd.setHours(23, 59, 59, 999);
+          return cellDate >= taskStart && cellDate <= taskEnd;
+        });
+
+        const dayEl = daysContainer.createDiv({
+          cls: `year-mini-day ${isToday ? 'is-today' : ''} ${hasTask ? 'has-task' : ''}`
+        });
+        dayEl.setText(String(day));
+      }
+    }
+
+    if (allTasks.length === 0) {
+      this.renderEmptyState(container);
+    }
+  }
+
+  // ==================== TIMELINE VIEW (Gantt-style) ====================
+  private renderTimelineView(container: HTMLElement): void {
+    const items = this.plugin.dataService.getTimelineItems();
+    const allTasks = this.getTasksOnly(items);
+
+    if (allTasks.length === 0) {
+      this.renderEmptyState(container);
       return;
     }
 
-    projects.forEach(project => {
-      const item = legend.createDiv({ cls: 'week-legend-item' });
-      const color = this.projectColors.get(project.id) || 'var(--text-muted)';
+    // Calculate date range
+    let minDate = new Date();
+    let maxDate = new Date();
+    minDate.setMonth(minDate.getMonth() - 1);
+    maxDate.setMonth(maxDate.getMonth() + 3);
 
-      const dot = item.createDiv({ cls: 'week-legend-dot' });
-      dot.style.backgroundColor = color;
+    allTasks.forEach(task => {
+      if (task.startDate < minDate) minDate = new Date(task.startDate);
+      if (task.endDate > maxDate) maxDate = new Date(task.endDate);
+    });
 
-      item.createSpan({ text: project.title });
+    // Add padding
+    minDate.setDate(minDate.getDate() - 7);
+    maxDate.setDate(maxDate.getDate() + 7);
+
+    const totalDays = Math.ceil((maxDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
+    const dayWidth = 20;
+
+    const grid = container.createDiv({ cls: 'gantt-container' });
+
+    // Header with months
+    const header = grid.createDiv({ cls: 'gantt-header' });
+    const taskNamesHeader = header.createDiv({ cls: 'gantt-task-names-header', text: 'Tasks' });
+    const timelineHeader = header.createDiv({ cls: 'gantt-timeline-header' });
+    timelineHeader.style.width = `${totalDays * dayWidth}px`;
+
+    // Render month headers
+    let currentMonth = -1;
+    for (let i = 0; i < totalDays; i++) {
+      const date = new Date(minDate);
+      date.setDate(date.getDate() + i);
+
+      if (date.getMonth() !== currentMonth) {
+        currentMonth = date.getMonth();
+        const monthHeader = timelineHeader.createDiv({ cls: 'gantt-month-header' });
+        monthHeader.setText(`${MONTH_NAMES[currentMonth]} ${date.getFullYear()}`);
+
+        // Calculate width until next month or end
+        let monthDays = 0;
+        const checkDate = new Date(date);
+        while (checkDate <= maxDate && checkDate.getMonth() === currentMonth) {
+          monthDays++;
+          checkDate.setDate(checkDate.getDate() + 1);
+        }
+        monthHeader.style.width = `${monthDays * dayWidth}px`;
+      }
+    }
+
+    // Task rows
+    const body = grid.createDiv({ cls: 'gantt-body' });
+    const taskNames = body.createDiv({ cls: 'gantt-task-names' });
+    const timelineBody = body.createDiv({ cls: 'gantt-timeline-body' });
+    timelineBody.style.width = `${totalDays * dayWidth}px`;
+
+    // Today line
+    const today = new Date();
+    const todayOffset = Math.ceil((today.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (todayOffset >= 0 && todayOffset <= totalDays) {
+      const todayLine = timelineBody.createDiv({ cls: 'gantt-today-line' });
+      todayLine.style.left = `${todayOffset * dayWidth}px`;
+    }
+
+    // Grid lines (weekly)
+    for (let i = 0; i < totalDays; i++) {
+      const date = new Date(minDate);
+      date.setDate(date.getDate() + i);
+      if (date.getDay() === 0) {
+        const gridLine = timelineBody.createDiv({ cls: 'gantt-grid-line' });
+        gridLine.style.left = `${i * dayWidth}px`;
+      }
+    }
+
+    // Render each task
+    allTasks.forEach((task, index) => {
+      const nameRow = taskNames.createDiv({ cls: 'gantt-task-name' });
+      nameRow.setText(task.title);
+
+      const timelineRow = timelineBody.createDiv({ cls: 'gantt-timeline-row' });
+
+      const taskStart = Math.max(0, Math.ceil((task.startDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24)));
+      const taskEnd = Math.ceil((task.endDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
+      const taskWidth = Math.max(taskEnd - taskStart, 1);
+
+      const bar = timelineRow.createDiv({
+        cls: `gantt-bar gantt-bar-${task.status}`,
+        attr: { 'data-task-id': task.id }
+      });
+      bar.style.left = `${taskStart * dayWidth}px`;
+      bar.style.width = `${taskWidth * dayWidth - 4}px`;
+      bar.style.backgroundColor = this.getTaskColor(task);
+
+      // Progress indicator
+      if (task.progress > 0) {
+        const progress = bar.createDiv({ cls: 'gantt-bar-progress' });
+        progress.style.width = `${task.progress}%`;
+      }
+
+      bar.setAttribute('title', `${task.title}\n${task.startDate.toLocaleDateString()} - ${task.endDate.toLocaleDateString()}\nProgress: ${task.progress}%`);
+
+      this.taskElements.set(task.id, bar);
+
+      bar.addEventListener('click', () => this.plugin.openEntity(task.id));
     });
   }
 
-  private renderWeekCalendar(container: HTMLElement): void {
-    const days = this.getWeekDays();
-    const items = this.plugin.dataService.getTimelineItems();
-    // Only get tasks, not projects
-    const allTasks = this.getTasksOnly(items);
-
-    // Create calendar grid
+  // ==================== SHARED TIME GRID (for day, 3days, week) ====================
+  private renderTimeGrid(container: HTMLElement, days: DayColumn[], tasks: TimelineItem[], numDays: number): void {
     const grid = container.createDiv({ cls: 'week-grid' });
 
-    // Header row with day names
+    // Header row
     const headerRow = grid.createDiv({ cls: 'week-header-row' });
     headerRow.createDiv({ cls: 'week-time-header' });
 
@@ -227,20 +599,16 @@ export class TimelineView extends ItemView {
       cell.createDiv({ cls: 'week-day-number', text: String(day.dayNumber) });
     });
 
-    // Scrollable time grid container
+    // Time grid
     const timeGridWrapper = grid.createDiv({ cls: 'week-timegrid-wrapper' });
     this.timeGridEl = timeGridWrapper.createDiv({ cls: 'week-timegrid' });
 
-    // Render hour rows
     HOURS.forEach(hour => {
       const hourRow = this.timeGridEl!.createDiv({ cls: 'week-hour-row' });
-
-      // Time label
       const timeLabel = hourRow.createDiv({ cls: 'week-time-cell' });
       const hourStr = hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`;
       timeLabel.createSpan({ cls: 'week-hour-label', text: hourStr });
 
-      // Day cells for this hour
       days.forEach((day, dayIndex) => {
         const cell = hourRow.createDiv({
           cls: `week-hour-cell ${day.isToday ? 'is-today' : ''}`
@@ -250,39 +618,95 @@ export class TimelineView extends ItemView {
       });
     });
 
-    // Render tasks overlaid on the time grid
-    this.renderTasks(this.timeGridEl!, days, allTasks);
+    this.renderTaskCards(this.timeGridEl!, days, tasks, numDays);
+    this.renderCurrentTimeIndicator(this.timeGridEl!, days, numDays);
 
-    // Add current time indicator
-    this.renderCurrentTimeIndicator(this.timeGridEl!, days);
-
-    // Empty state if no tasks
-    if (allTasks.length === 0) {
+    if (tasks.length === 0) {
       this.renderEmptyState(container);
     }
   }
 
-  private getTasksOnly(items: TimelineItem[]): TimelineItem[] {
-    const tasks: TimelineItem[] = [];
+  private renderTaskCards(timeGrid: HTMLElement, days: DayColumn[], tasks: TimelineItem[], numDays: number): void {
+    Logger.info(`renderTaskCards() - START (${tasks.length} tasks, ${numDays} days)`);
+    tasks.forEach(task => {
+      const dayIndex = days.findIndex(day => {
+        const dayStart = new Date(day.date);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(day.date);
+        dayEnd.setHours(23, 59, 59, 999);
+        return task.startDate >= dayStart && task.startDate <= dayEnd;
+      });
 
-    items.forEach(item => {
-      // Only include tasks, not projects
-      if (item.type === 'task') {
-        tasks.push(item);
+      if (dayIndex === -1) {
+        Logger.warn(`renderTaskCards() - Task "${task.title}" not in visible day range, skipping`);
+        return;
       }
-      // Include children tasks from projects
-      if (item.children) {
-        tasks.push(...item.children);
-      }
+      Logger.debug(`renderTaskCards() - Rendering task "${task.title}" on day ${dayIndex}`);
+
+      const card = timeGrid.createDiv({
+        cls: `week-task-card week-task-card-${task.status}`,
+        attr: { 'data-task-id': task.id }
+      });
+
+      const color = this.getTaskColor(task);
+      card.style.borderLeftColor = color;
+      card.style.setProperty('--task-color', color);
+
+      const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / ${numDays})`;
+      const startHour = task.startDate.getHours();
+      const startMinutes = task.startDate.getMinutes();
+      const endHour = task.endDate.getHours();
+      const endMinutes = task.endDate.getMinutes();
+
+      const topPosition = (startHour * HOUR_HEIGHT) + (startMinutes / 60 * HOUR_HEIGHT);
+      const durationMinutes = (endHour * 60 + endMinutes) - (startHour * 60 + startMinutes);
+      const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, HOUR_HEIGHT / 2);
+
+      card.style.left = `calc(${TIME_COLUMN_WIDTH}px + ${dayIndex} * ${dayWidth})`;
+      card.style.top = `${topPosition}px`;
+      card.style.width = `calc(${dayWidth} - 4px)`;
+      card.style.height = `${height}px`;
+
+      const cardHeader = card.createDiv({ cls: 'week-task-card-header' });
+      cardHeader.createDiv({ cls: 'week-task-card-title', text: task.title });
+
+      // Delete button
+      const deleteBtn = cardHeader.createDiv({ cls: 'week-task-delete-btn', text: '×' });
+      deleteBtn.setAttribute('title', 'Delete task');
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (confirm(`Delete task "${task.title}"?`)) {
+          Logger.info(`Deleting task: ${task.id}`);
+          const success = await this.plugin.dataService.deleteEntity(task.id);
+          if (success) {
+            await this.render();
+          }
+        }
+      });
+
+      const timeStr = this.formatTime(task.startDate) + ' - ' + this.formatTime(task.endDate);
+      card.createDiv({ cls: 'week-task-card-time', text: timeStr });
+
+      // Resize handles
+      const resizeTop = card.createDiv({ cls: 'resize-handle resize-handle-top' });
+      const resizeBottom = card.createDiv({ cls: 'resize-handle resize-handle-bottom' });
+
+      // Connection handles
+      const leftHandle = card.createDiv({ cls: 'connection-handle connection-handle-left' });
+      leftHandle.setAttribute('data-task-id', task.id);
+      const rightHandle = card.createDiv({ cls: 'connection-handle connection-handle-right' });
+      rightHandle.setAttribute('data-task-id', task.id);
+
+      this.setupTaskDragHandlers(card, task, resizeTop, resizeBottom, rightHandle);
+      this.taskElements.set(task.id, card);
     });
-
-    return tasks;
+    Logger.success(`renderTaskCards() - END (rendered ${this.taskElements.size} task elements)`);
   }
 
-  private renderCurrentTimeIndicator(timeGrid: HTMLElement, days: DayColumn[]): void {
+  private renderCurrentTimeIndicator(timeGrid: HTMLElement, days: DayColumn[], numDays: number): void {
     const now = new Date();
     const todayIndex = days.findIndex(day => day.isToday);
-
     if (todayIndex === -1) return;
 
     const hours = now.getHours();
@@ -295,82 +719,157 @@ export class TimelineView extends ItemView {
     indicator.style.width = `calc(100% - ${TIME_COLUMN_WIDTH}px)`;
 
     const dot = indicator.createDiv({ cls: 'current-time-dot' });
-    const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / 7)`;
+    const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / ${numDays})`;
     dot.style.left = `calc(${todayIndex} * ${dayWidth})`;
   }
 
-  private renderTasks(timeGrid: HTMLElement, days: DayColumn[], tasks: TimelineItem[]): void {
-    tasks.forEach(task => {
-      const card = this.createTaskCard(timeGrid, task, days);
-      if (card) {
-        this.taskElements.set(task.id, card);
+  // ==================== LEGEND ====================
+  private renderLegend(container: HTMLElement): void {
+    const legend = container.createDiv({ cls: 'week-legend' });
+    legend.createEl('h4', { text: 'Projects' });
+
+    const items = this.plugin.dataService.getTimelineItems();
+    const projects = items.filter(item => item.type === 'project');
+
+    if (projects.length === 0) {
+      legend.createDiv({ cls: 'week-legend-empty', text: 'No projects yet' });
+
+      const createBtn = legend.createEl('button', {
+        cls: 'week-legend-create-btn',
+        text: '+ Create Project'
+      });
+      createBtn.addEventListener('click', () => this.plugin.createNewEntity('project'));
+      return;
+    }
+
+    projects.forEach(project => {
+      const item = legend.createDiv({ cls: 'week-legend-item' });
+      const color = this.projectColors.get(project.id) || 'var(--text-muted)';
+      const dot = item.createDiv({ cls: 'week-legend-dot' });
+      dot.style.backgroundColor = color;
+      item.createSpan({ text: project.title });
+    });
+
+    // Always show create project option
+    const createBtn = legend.createEl('button', {
+      cls: 'week-legend-create-btn',
+      text: '+ Add Project'
+    });
+    createBtn.addEventListener('click', () => this.plugin.createNewEntity('project'));
+  }
+
+  // ==================== DEPENDENCY LINES ====================
+  private renderDependencyLines(): void {
+    if (!this.svgLayer) return;
+
+    // Clear existing lines (except drag line)
+    Array.from(this.svgLayer.children).forEach(child => {
+      if (!child.classList.contains('dependency-drag-line')) {
+        this.svgLayer?.removeChild(child);
+      }
+    });
+
+    // Add defs for markers
+    let defs = this.svgLayer.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      this.svgLayer.appendChild(defs);
+    }
+
+    const items = this.plugin.dataService.getTimelineItems();
+    const allTasks = this.getTasksOnly(items);
+
+    allTasks.forEach(task => {
+      const taskEntity = this.plugin.dataService.getEntity(task.id) as Task | undefined;
+      if (taskEntity?.dependencies) {
+        taskEntity.dependencies.forEach(depId => {
+          this.drawDependencyLine(depId, task.id);
+        });
       }
     });
   }
 
-  private createTaskCard(timeGrid: HTMLElement, task: TimelineItem, days: DayColumn[]): HTMLElement | null {
-    // Find which day this task belongs to
-    const dayIndex = days.findIndex(day => {
-      const dayStart = new Date(day.date);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(day.date);
-      dayEnd.setHours(23, 59, 59, 999);
-      return task.startDate.getTime() >= dayStart.getTime() && task.startDate.getTime() <= dayEnd.getTime();
-    });
+  private drawDependencyLine(fromId: string, toId: string): void {
+    const fromEl = this.taskElements.get(fromId);
+    const toEl = this.taskElements.get(toId);
 
-    if (dayIndex === -1) return null;
+    if (!fromEl || !toEl || !this.svgLayer) return;
 
-    const card = timeGrid.createDiv({
-      cls: `week-task-card week-task-card-${task.status}`,
-      attr: { 'data-task-id': task.id }
-    });
+    const containerRect = this.svgLayer.getBoundingClientRect();
+    const fromRect = fromEl.getBoundingClientRect();
+    const toRect = toEl.getBoundingClientRect();
 
-    // Apply project color
-    const color = this.getTaskColor(task);
-    card.style.borderLeftColor = color;
-    card.style.setProperty('--task-color', color);
+    // Check if elements are visible
+    if (fromRect.width === 0 || toRect.width === 0) return;
 
-    // Position the card based on actual task times
-    const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / 7)`;
+    const x1 = fromRect.right - containerRect.left;
+    const y1 = fromRect.top + fromRect.height / 2 - containerRect.top;
+    const x2 = toRect.left - containerRect.left;
+    const y2 = toRect.top + toRect.height / 2 - containerRect.top;
 
-    const startHour = task.startDate.getHours();
-    const startMinutes = task.startDate.getMinutes();
-    const endHour = task.endDate.getHours();
-    const endMinutes = task.endDate.getMinutes();
+    // Create unique marker
+    const markerId = `arrow-${fromId}-${toId}`.replace(/[^a-zA-Z0-9-]/g, '-');
 
-    const topPosition = (startHour * HOUR_HEIGHT) + (startMinutes / 60 * HOUR_HEIGHT);
-    const durationMinutes = (endHour * 60 + endMinutes) - (startHour * 60 + startMinutes);
-    const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, HOUR_HEIGHT / 2);
+    let defs = this.svgLayer.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      this.svgLayer.appendChild(defs);
+    }
 
-    card.style.left = `calc(${TIME_COLUMN_WIDTH}px + ${dayIndex} * ${dayWidth})`;
-    card.style.top = `${topPosition}px`;
-    card.style.width = `calc(${dayWidth} - 4px)`;
-    card.style.height = `${height}px`;
+    // Check if marker already exists
+    if (!defs.querySelector(`#${markerId}`)) {
+      const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      marker.setAttribute('id', markerId);
+      marker.setAttribute('viewBox', '0 0 10 10');
+      marker.setAttribute('refX', '9');
+      marker.setAttribute('refY', '5');
+      marker.setAttribute('markerWidth', '8');
+      marker.setAttribute('markerHeight', '8');
+      marker.setAttribute('orient', 'auto-start-reverse');
 
-    // Task title
-    card.createDiv({ cls: 'week-task-card-title', text: task.title });
+      const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      arrowPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+      arrowPath.setAttribute('fill', 'var(--text-accent)');
+      marker.appendChild(arrowPath);
+      defs.appendChild(marker);
+    }
 
-    // Time label
-    const timeStr = this.formatTime(task.startDate) + ' - ' + this.formatTime(task.endDate);
-    card.createDiv({ cls: 'week-task-card-time', text: timeStr });
+    // Draw curved path
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const midX = (x1 + x2) / 2;
+    const controlOffset = Math.min(Math.abs(x2 - x1) / 2, 50);
 
-    // Resize handles (top and bottom)
-    const resizeTop = card.createDiv({ cls: 'resize-handle resize-handle-top' });
-    const resizeBottom = card.createDiv({ cls: 'resize-handle resize-handle-bottom' });
+    const path = `M ${x1} ${y1} C ${x1 + controlOffset} ${y1}, ${x2 - controlOffset} ${y2}, ${x2} ${y2}`;
+    line.setAttribute('d', path);
+    line.setAttribute('class', 'dependency-line');
+    line.setAttribute('marker-end', `url(#${markerId})`);
+    line.setAttribute('data-from', fromId);
+    line.setAttribute('data-to', toId);
 
-    // Connection handles (left and right)
-    const leftHandle = card.createDiv({ cls: 'connection-handle connection-handle-left' });
-    leftHandle.setAttribute('data-task-id', task.id);
-
-    const rightHandle = card.createDiv({ cls: 'connection-handle connection-handle-right' });
-    rightHandle.setAttribute('data-task-id', task.id);
-
-    // Event handlers
-    this.setupTaskDragHandlers(card, task, resizeTop, resizeBottom, rightHandle);
-
-    return card;
+    this.svgLayer.appendChild(line);
   }
 
+  // ==================== EMPTY STATE ====================
+  private renderEmptyState(container: HTMLElement): void {
+    const emptyState = container.createDiv({ cls: 'week-empty-state' });
+    emptyState.createEl('p', { text: 'No tasks scheduled for this period.' });
+    emptyState.createEl('p', { text: 'Create a project to get started!' });
+
+    const btnContainer = emptyState.createDiv({ cls: 'empty-state-buttons' });
+
+    const createProjectBtn = btnContainer.createEl('button', {
+      text: 'Create Project',
+      cls: 'mod-cta'
+    });
+    createProjectBtn.addEventListener('click', () => this.plugin.createNewEntity('project'));
+
+    const createTaskBtn = btnContainer.createEl('button', {
+      text: 'Create Task'
+    });
+    createTaskBtn.addEventListener('click', () => this.plugin.createNewEntity('task'));
+  }
+
+  // ==================== DRAG HANDLERS ====================
   private setupTaskDragHandlers(
     card: HTMLElement,
     task: TimelineItem,
@@ -378,7 +877,6 @@ export class TimelineView extends ItemView {
     resizeBottom: HTMLElement,
     rightHandle: HTMLElement
   ): void {
-    // Click to open
     card.addEventListener('click', (e) => {
       if (!this.isDraggingTask && !this.isResizingTask && !this.isDraggingConnection) {
         e.stopPropagation();
@@ -386,32 +884,28 @@ export class TimelineView extends ItemView {
       }
     });
 
-    // Drag to move (on the card body)
     card.addEventListener('mousedown', (e) => {
       const target = e.target as HTMLElement;
       if (target.classList.contains('resize-handle') || target.classList.contains('connection-handle')) {
-        return; // Don't start drag if clicking on handles
+        return;
       }
       e.preventDefault();
       e.stopPropagation();
       this.startTaskDrag(task.id, e);
     });
 
-    // Resize top (change start time)
     resizeTop.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.startTaskResize(task.id, 'top', e);
     });
 
-    // Resize bottom (change end time)
     resizeBottom.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.startTaskResize(task.id, 'bottom', e);
     });
 
-    // Connection drag (right handle)
     rightHandle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -475,7 +969,6 @@ export class TimelineView extends ItemView {
   }
 
   private handleGlobalMouseMove(e: MouseEvent): void {
-    // Handle connection drag
     if (this.isDraggingConnection && this.dragLine && this.svgLayer) {
       const containerRect = this.svgLayer.getBoundingClientRect();
       this.dragLine.setAttribute('x2', String(e.clientX - containerRect.left));
@@ -483,12 +976,10 @@ export class TimelineView extends ItemView {
       return;
     }
 
-    // Handle task drag (move)
     if (this.isDraggingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
 
-      // Update visual position
       const taskEl = this.taskElements.get(this.draggedTaskId);
       if (taskEl) {
         const newStartDate = new Date(this.originalStartDate);
@@ -500,31 +991,33 @@ export class TimelineView extends ItemView {
       return;
     }
 
-    // Handle task resize
     if (this.isResizingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
 
       const taskEl = this.taskElements.get(this.draggedTaskId);
       if (taskEl) {
+        // Calculate original positions from dates, not from DOM (which may be stale)
+        const originalTop = (this.originalStartDate.getHours() * HOUR_HEIGHT) + (this.originalStartDate.getMinutes() / 60 * HOUR_HEIGHT);
+        const originalDuration = (this.originalEndDate.getTime() - this.originalStartDate.getTime()) / 60000;
+        const originalHeight = (originalDuration / 60) * HOUR_HEIGHT;
+
         if (this.resizeEdge === 'top') {
           const newStartDate = new Date(this.originalStartDate);
           newStartDate.setMinutes(newStartDate.getMinutes() + deltaMinutes);
 
           const topPosition = (newStartDate.getHours() * HOUR_HEIGHT) + (newStartDate.getMinutes() / 60 * HOUR_HEIGHT);
-          const originalBottom = parseFloat(taskEl.style.top) + parseFloat(taskEl.style.height);
+          const originalBottom = originalTop + originalHeight;
           const newHeight = originalBottom - topPosition;
 
-          if (newHeight >= HOUR_HEIGHT / 4) { // Minimum 15 min
+          if (newHeight >= HOUR_HEIGHT / 4 && newStartDate < this.originalEndDate) {
             taskEl.style.top = `${topPosition}px`;
             taskEl.style.height = `${newHeight}px`;
           }
         } else if (this.resizeEdge === 'bottom') {
-          const durationChange = deltaMinutes;
-          const originalDuration = (this.originalEndDate.getTime() - this.originalStartDate.getTime()) / 60000;
-          const newDuration = originalDuration + durationChange;
+          const newDuration = originalDuration + deltaMinutes;
 
-          if (newDuration >= 15) { // Minimum 15 min
+          if (newDuration >= 15) {
             const newHeight = (newDuration / 60) * HOUR_HEIGHT;
             taskEl.style.height = `${newHeight}px`;
           }
@@ -535,7 +1028,6 @@ export class TimelineView extends ItemView {
   }
 
   private async handleGlobalMouseUp(e: MouseEvent): Promise<void> {
-    // Handle connection drop
     if (this.isDraggingConnection) {
       const target = e.target as HTMLElement;
       const leftHandle = target.closest('.connection-handle-left');
@@ -551,7 +1043,6 @@ export class TimelineView extends ItemView {
       return;
     }
 
-    // Handle task drag end (save new position)
     if (this.isDraggingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
@@ -568,14 +1059,13 @@ export class TimelineView extends ItemView {
           dueDate: newEndDate
         });
 
-        await this.render();
+        await this.renderPreservingScroll();
       }
 
       this.endTaskDrag();
       return;
     }
 
-    // Handle resize end (save new duration)
     if (this.isResizingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
@@ -585,7 +1075,6 @@ export class TimelineView extends ItemView {
           const newStartDate = new Date(this.originalStartDate);
           newStartDate.setMinutes(newStartDate.getMinutes() + deltaMinutes);
 
-          // Ensure start < end
           if (newStartDate < this.originalEndDate) {
             await this.plugin.dataService.updateEntity(this.draggedTaskId, {
               startDate: newStartDate
@@ -595,7 +1084,6 @@ export class TimelineView extends ItemView {
           const newEndDate = new Date(this.originalEndDate);
           newEndDate.setMinutes(newEndDate.getMinutes() + deltaMinutes);
 
-          // Ensure end > start
           if (newEndDate > this.originalStartDate) {
             await this.plugin.dataService.updateEntity(this.draggedTaskId, {
               dueDate: newEndDate
@@ -603,7 +1091,7 @@ export class TimelineView extends ItemView {
           }
         }
 
-        await this.render();
+        await this.renderPreservingScroll();
       }
 
       this.endTaskResize();
@@ -654,7 +1142,7 @@ export class TimelineView extends ItemView {
       if (!dependencies.includes(fromTaskId)) {
         dependencies.push(fromTaskId);
         await this.plugin.dataService.updateEntity(toTaskId, { dependencies });
-        await this.render();
+        await this.renderPreservingScroll();
       }
     }
   }
@@ -678,100 +1166,20 @@ export class TimelineView extends ItemView {
     return checkDependencies(fromId);
   }
 
-  private renderDependencyLines(): void {
-    if (!this.svgLayer) return;
+  // ==================== HELPERS ====================
+  private createDayColumn(date: Date): DayColumn {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
 
-    const children = Array.from(this.svgLayer.children);
-    children.forEach(child => {
-      if (!child.classList.contains('dependency-drag-line')) {
-        this.svgLayer?.removeChild(child);
-      }
-    });
-
-    const items = this.plugin.dataService.getTimelineItems();
-    const allTasks = this.getTasksOnly(items);
-
-    allTasks.forEach(task => {
-      const taskEntity = this.plugin.dataService.getEntity(task.id) as Task | undefined;
-      if (taskEntity?.dependencies) {
-        taskEntity.dependencies.forEach(depId => {
-          this.drawDependencyLine(depId, task.id);
-        });
-      }
-    });
-  }
-
-  private drawDependencyLine(fromId: string, toId: string): void {
-    const fromEl = this.taskElements.get(fromId);
-    const toEl = this.taskElements.get(toId);
-
-    if (!fromEl || !toEl || !this.svgLayer) return;
-
-    const containerRect = this.svgLayer.getBoundingClientRect();
-    const fromRect = fromEl.getBoundingClientRect();
-    const toRect = toEl.getBoundingClientRect();
-
-    const x1 = fromRect.right - containerRect.left;
-    const y1 = fromRect.top + fromRect.height / 2 - containerRect.top;
-    const x2 = toRect.left - containerRect.left;
-    const y2 = toRect.top + toRect.height / 2 - containerRect.top;
-
-    const markerId = `arrowhead-${fromId}-${toId}`.replace(/[^a-zA-Z0-9-]/g, '');
-    let defs = this.svgLayer.querySelector('defs');
-    if (!defs) {
-      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-      this.svgLayer.appendChild(defs);
-    }
-
-    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-    marker.setAttribute('id', markerId);
-    marker.setAttribute('viewBox', '0 0 10 10');
-    marker.setAttribute('refX', '9');
-    marker.setAttribute('refY', '5');
-    marker.setAttribute('markerWidth', '6');
-    marker.setAttribute('markerHeight', '6');
-    marker.setAttribute('orient', 'auto-start-reverse');
-
-    const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    arrowPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-    arrowPath.setAttribute('fill', 'var(--text-muted)');
-    marker.appendChild(arrowPath);
-    defs.appendChild(marker);
-
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    const midX = (x1 + x2) / 2;
-    const path = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-
-    line.setAttribute('d', path);
-    line.setAttribute('class', 'dependency-line');
-    line.setAttribute('marker-end', `url(#${markerId})`);
-
-    this.svgLayer.appendChild(line);
-  }
-
-  private renderEmptyState(container: HTMLElement): void {
-    const emptyState = container.createDiv({ cls: 'week-empty-state' });
-    emptyState.createEl('p', { text: 'No tasks scheduled for this week.' });
-    emptyState.createEl('p', { text: 'Create a project to add tasks!' });
-
-    const createBtn = emptyState.createEl('button', {
-      text: 'Create Project',
-      cls: 'mod-cta'
-    });
-    createBtn.addEventListener('click', () => {
-      this.plugin.createNewEntity('project');
-    });
-  }
-
-  // ==================== Helper Methods ====================
-
-  private formatTime(date: Date): string {
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const h = hours % 12 || 12;
-    const m = minutes.toString().padStart(2, '0');
-    return `${h}:${m} ${ampm}`;
+    return {
+      date: new Date(date),
+      dayName: DAY_NAMES[date.getDay()],
+      dayNumber: date.getDate(),
+      isToday: checkDate.getTime() === today.getTime(),
+      monthName: MONTH_NAMES[date.getMonth()]
+    };
   }
 
   private getWeekStart(date: Date): Date {
@@ -782,40 +1190,56 @@ export class TimelineView extends ItemView {
     return d;
   }
 
-  private getWeekDays(): DayColumn[] {
-    const days: DayColumn[] = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  private getTasksForDays(days: DayColumn[]): TimelineItem[] {
+    Logger.info(`getTasksForDays() - START (${days.length} days)`);
+    const items = this.plugin.dataService.getTimelineItems();
+    Logger.debug(`getTasksForDays() - Got ${items.length} timeline items from dataService`);
+    const allTasks = this.getTasksOnly(items);
+    Logger.debug(`getTasksForDays() - Extracted ${allTasks.length} tasks total`);
 
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(this.currentWeekStart);
-      date.setDate(date.getDate() + i);
+    const startOfRange = new Date(days[0].date);
+    startOfRange.setHours(0, 0, 0, 0);
+    const endOfRange = new Date(days[days.length - 1].date);
+    endOfRange.setHours(23, 59, 59, 999);
 
-      days.push({
-        date,
-        dayName: DAY_NAMES[i],
-        dayNumber: date.getDate(),
-        isToday: date.getTime() === today.getTime()
-      });
-    }
+    Logger.debug(`getTasksForDays() - Date range: ${startOfRange.toISOString()} to ${endOfRange.toISOString()}`);
 
-    return days;
+    const filteredTasks = allTasks.filter(task => {
+      const inRange = task.startDate <= endOfRange && task.endDate >= startOfRange;
+      Logger.debug(`getTasksForDays() - Task "${task.title}": ${task.startDate.toISOString()} to ${task.endDate.toISOString()} - inRange: ${inRange}`);
+      return inRange;
+    });
+
+    Logger.success(`getTasksForDays() - END (${filteredTasks.length} tasks in range)`);
+    return filteredTasks;
   }
 
-  private navigateWeek(direction: number): void {
-    this.currentWeekStart.setDate(this.currentWeekStart.getDate() + (direction * 7));
-    this.render();
+  private getTasksOnly(items: TimelineItem[]): TimelineItem[] {
+    Logger.debug(`getTasksOnly() - Processing ${items.length} items`);
+    const tasks: TimelineItem[] = [];
+    items.forEach(item => {
+      if (item.type === 'task') {
+        Logger.debug(`getTasksOnly() - Found standalone task: "${item.title}"`);
+        tasks.push(item);
+      }
+      if (item.children) {
+        Logger.debug(`getTasksOnly() - Project "${item.title}" has ${item.children.length} child tasks`);
+        item.children.forEach(child => {
+          Logger.debug(`getTasksOnly() - Child task: "${child.title}"`);
+        });
+        tasks.push(...item.children);
+      }
+    });
+    Logger.debug(`getTasksOnly() - Total tasks extracted: ${tasks.length}`);
+    return tasks;
   }
 
-  private goToToday(): void {
-    this.currentWeekStart = this.getWeekStart(new Date());
-    this.render();
-  }
-
-  private formatDateRange(start: Date, end: Date): string {
-    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-    const startStr = start.toLocaleDateString('en-US', options);
-    const endStr = end.toLocaleDateString('en-US', { ...options, year: 'numeric' });
-    return `${startStr} - ${endStr}`;
+  private formatTime(date: Date): string {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h = hours % 12 || 12;
+    const m = minutes.toString().padStart(2, '0');
+    return `${h}:${m} ${ampm}`;
   }
 }

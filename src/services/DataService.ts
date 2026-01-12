@@ -13,6 +13,7 @@ import type {
   Priority,
   EntityFrontmatter
 } from '../models/types';
+import { Logger } from '../utils/Logger';
 
 export class DataService {
   private app: App;
@@ -32,20 +33,23 @@ export class DataService {
    * Initialize and build cache from vault files
    */
   async initialize(): Promise<void> {
+    Logger.info('DataService.initialize() - START');
     await this.refreshCache();
+    Logger.success('DataService.initialize() - END');
   }
 
   /**
    * Refresh the entity cache by scanning vault files
    */
   async refreshCache(): Promise<void> {
+    Logger.info('DataService.refreshCache() - START');
     this.cache.clear();
 
     if (this.settings.useNestedFolders) {
-      // Scan nested structure recursively
+      Logger.debug('Using nested folder structure, root:', this.settings.rootFolder);
       await this.scanFolderRecursive(this.settings.rootFolder);
     } else {
-      // Scan flat structure
+      Logger.debug('Using flat folder structure');
       const folders = [
         { folder: this.settings.goalsFolder, type: 'goal' as EntityType },
         { folder: this.settings.portfoliosFolder, type: 'portfolio' as EntityType },
@@ -57,20 +61,27 @@ export class DataService {
         await this.scanFolder(folder, type);
       }
     }
+
+    Logger.success(`DataService.refreshCache() - END. Found ${this.cache.size} entities`);
+    Logger.debug('Cached entities:', Array.from(this.cache.values()).map(e => ({ id: e.id, title: e.title, type: e.type })));
   }
 
   private async scanFolder(folderPath: string, expectedType: EntityType): Promise<void> {
+    Logger.debug(`scanFolder() - Scanning: ${folderPath} for type: ${expectedType}`);
     const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
     if (!folder || !(folder instanceof TFolder)) {
+      Logger.warn(`scanFolder() - Folder not found or not a folder: ${folderPath}`);
       return;
     }
 
     const files = folder.children.filter((f): f is TFile => f instanceof TFile && f.extension === 'md');
+    Logger.debug(`scanFolder() - Found ${files.length} markdown files in ${folderPath}`);
 
     for (const file of files) {
       const entity = await this.parseFile(file, expectedType);
       if (entity) {
         this.cache.set(entity.id, entity);
+        Logger.debug(`scanFolder() - Cached entity: ${entity.title} (${entity.id})`);
       }
     }
   }
@@ -81,15 +92,23 @@ export class DataService {
   private async scanFolderRecursive(folderPath: string): Promise<void> {
     const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
     if (!folder || !(folder instanceof TFolder)) {
+      Logger.warn(`scanFolderRecursive() - Folder not found: ${folderPath}`);
       return;
     }
 
+    Logger.debug(`scanFolderRecursive() - Scanning: ${folderPath}`);
+
     // Process all markdown files in this folder
     const files = folder.children.filter((f): f is TFile => f instanceof TFile && f.extension === 'md');
+    Logger.debug(`scanFolderRecursive() - Found ${files.length} files in ${folderPath}`);
+
     for (const file of files) {
       const entity = await this.parseFile(file);
       if (entity) {
         this.cache.set(entity.id, entity);
+        Logger.debug(`scanFolderRecursive() - Cached: ${entity.type} "${entity.title}" (${entity.id})`);
+      } else {
+        Logger.warn(`scanFolderRecursive() - Could not parse file: ${file.path}`);
       }
     }
 
@@ -101,12 +120,22 @@ export class DataService {
   }
 
   private async parseFile(file: TFile, expectedType?: EntityType): Promise<Entity | null> {
+    Logger.debug(`parseFile() - Parsing: ${file.path}`);
     const metadata = this.app.metadataCache.getFileCache(file);
+
+    if (!metadata) {
+      Logger.warn(`parseFile() - No metadata cache for: ${file.path} (cache may not be ready)`);
+      return null;
+    }
+
     const frontmatter = metadata?.frontmatter as EntityFrontmatter | undefined;
 
     if (!frontmatter) {
+      Logger.warn(`parseFile() - No frontmatter in: ${file.path}`);
       return null;
     }
+
+    Logger.debug(`parseFile() - Frontmatter found: type=${frontmatter.type}, id=${frontmatter.id}`);
 
     // In nested structure, type comes from frontmatter
     // In flat structure, type is provided as parameter
@@ -235,12 +264,18 @@ export class DataService {
    * Get timeline items for visualization
    */
   getTimelineItems(): TimelineItem[] {
+    Logger.info('getTimelineItems() - START');
     const items: TimelineItem[] = [];
 
     // Get projects with dates
     const projects = this.getEntitiesByType<Project>('project');
+    Logger.debug(`getTimelineItems() - Found ${projects.length} projects in cache`);
+
     for (const project of projects) {
+      Logger.debug(`getTimelineItems() - Project "${project.title}": startDate=${project.startDate}, endDate=${project.endDate}`);
       if (project.startDate && project.endDate) {
+        const children = this.getProjectTasksAsTimelineItems(project.id);
+        Logger.debug(`getTimelineItems() - Project "${project.title}" has ${children.length} tasks`);
         items.push({
           id: project.id,
           title: project.title,
@@ -249,14 +284,19 @@ export class DataService {
           endDate: project.endDate,
           progress: project.progress,
           status: project.status,
-          children: this.getProjectTasksAsTimelineItems(project.id),
+          children: children,
         });
+      } else {
+        Logger.warn(`getTimelineItems() - Project "${project.title}" skipped: missing dates`);
       }
     }
 
     // Get standalone tasks with dates
     const tasks = this.getEntitiesByType<Task>('task');
+    Logger.debug(`getTimelineItems() - Found ${tasks.length} tasks in cache`);
+
     for (const task of tasks) {
+      Logger.debug(`getTimelineItems() - Task "${task.title}": projectId=${task.projectId}, startDate=${task.startDate}, dueDate=${task.dueDate}`);
       if (!task.projectId && task.startDate && task.dueDate) {
         items.push({
           id: task.id,
@@ -270,23 +310,28 @@ export class DataService {
       }
     }
 
+    Logger.success(`getTimelineItems() - END. Returning ${items.length} items`);
     return items.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
   }
 
   private getProjectTasksAsTimelineItems(projectId: string): TimelineItem[] {
-    const tasks = this.getEntitiesByType<Task>('task').filter(t => t.projectId === projectId);
+    const allTasks = this.getEntitiesByType<Task>('task');
+    const tasks = allTasks.filter(t => t.projectId === projectId);
+    Logger.debug(`getProjectTasksAsTimelineItems() - Project ${projectId}: found ${tasks.length} tasks (total tasks: ${allTasks.length})`);
 
-    return tasks
-      .filter(task => task.startDate && task.dueDate)
-      .map(task => ({
-        id: task.id,
-        title: task.title,
-        type: 'task' as EntityType,
-        startDate: task.startDate!,
-        endDate: task.dueDate!,
-        progress: task.progress,
-        status: task.status,
-      }));
+    const validTasks = tasks.filter(task => task.startDate && task.dueDate);
+    Logger.debug(`getProjectTasksAsTimelineItems() - ${validTasks.length} tasks have valid dates`);
+
+    return validTasks.map(task => ({
+      id: task.id,
+      title: task.title,
+      type: 'task' as EntityType,
+      startDate: task.startDate!,
+      endDate: task.dueDate!,
+      progress: task.progress,
+      status: task.status,
+      projectId: projectId,  // Include parent project ID for color mapping
+    }));
   }
 
   /**
@@ -348,8 +393,10 @@ export class DataService {
    * Create a new entity file
    */
   async createEntity(type: EntityType, title: string, parentId?: string): Promise<Entity | null> {
+    Logger.info(`createEntity() - START (type: ${type}, title: "${title}", parentId: ${parentId || 'none'})`);
     const folder = this.getFolderForType(type, parentId);
     const folderPath = normalizePath(folder);
+    Logger.debug(`createEntity() - Target folder: ${folderPath}`);
 
     // Ensure folder exists (creates parent directories recursively)
     try {
@@ -407,9 +454,11 @@ export class DataService {
     const uniqueFilePath = await this.getUniqueFilePath(folderPath, fileName);
 
     try {
+      Logger.debug(`createEntity() - Creating file: ${uniqueFilePath}`);
       await this.app.vault.create(uniqueFilePath, content);
+      Logger.success(`createEntity() - File created: ${uniqueFilePath}`);
     } catch (error) {
-      console.error(`Failed to create file ${uniqueFilePath}:`, error);
+      Logger.error(`createEntity() - Failed to create file ${uniqueFilePath}`, error);
       throw new Error(`Could not create ${type}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
@@ -418,13 +467,18 @@ export class DataService {
     // hasn't indexed the new file yet, so getFolderForType would fail.
     // We pass the project title directly to build the correct folder path.
     if (type === 'project') {
+      Logger.info(`createEntity() - Creating sample tasks for project "${title}"...`);
       await this.createSampleTasksForProject(id, title, folderPath);
+      Logger.success(`createEntity() - Sample tasks created`);
     }
 
     // Refresh cache to include new entity and sample tasks
+    Logger.info('createEntity() - Refreshing cache...');
     await this.refreshCache();
 
-    return this.cache.get(id) || null;
+    const createdEntity = this.cache.get(id);
+    Logger.success(`createEntity() - END (entity in cache: ${createdEntity ? 'yes' : 'NO!'})`);
+    return createdEntity || null;
   }
 
   /**
@@ -682,6 +736,7 @@ export class DataService {
     projectTitle: string,
     projectFolderPath: string
   ): Promise<void> {
+    Logger.info(`createSampleTasksForProject() - START (projectId: ${projectId}, title: "${projectTitle}")`);
     const today = new Date();
 
     const sampleTasks = [
@@ -727,7 +782,10 @@ export class DataService {
       },
     ];
 
+    Logger.debug(`createSampleTasksForProject() - Creating ${sampleTasks.length} sample tasks`);
+
     for (const taskSpec of sampleTasks) {
+      Logger.debug(`createSampleTasksForProject() - Creating task: "${taskSpec.title}"`);
       const startDate = new Date(today);
       startDate.setDate(today.getDate() + taskSpec.startDays);
       startDate.setHours(taskSpec.startHour, 0, 0, 0);
@@ -745,12 +803,13 @@ export class DataService {
         ? normalizePath(`${projectFolderPath}/${sanitizedTitle}/Tasks`)
         : normalizePath(this.settings.tasksFolder);
       const folderPath = taskFolderPath;
+      Logger.debug(`createSampleTasksForProject() - Task folder: ${folderPath}`);
 
       // Ensure folder exists (creates parent directories recursively)
       try {
         await this.ensureFolderExists(folderPath);
       } catch (error) {
-        console.error(`Failed to create task folder ${folderPath}:`, error);
+        Logger.error(`createSampleTasksForProject() - Failed to create task folder ${folderPath}`, error);
         continue;
       }
 
@@ -773,13 +832,44 @@ export class DataService {
 
       try {
         await this.app.vault.create(uniqueFilePath, content);
+        Logger.debug(`createSampleTasksForProject() - Task created: ${uniqueFilePath}`);
       } catch (error) {
-        console.error(`Failed to create sample task ${taskSpec.title}:`, error);
+        Logger.error(`createSampleTasksForProject() - Failed to create task ${taskSpec.title}`, error);
       }
     }
 
     // Refresh cache after creating all sample tasks
+    Logger.info('createSampleTasksForProject() - Refreshing cache after task creation...');
     await this.refreshCache();
+    Logger.success(`createSampleTasksForProject() - END (cache size: ${this.cache.size})`);
+  }
+
+  /**
+   * Delete an entity file
+   */
+  async deleteEntity(id: string): Promise<boolean> {
+    Logger.info(`deleteEntity() - START (id: ${id})`);
+    const entity = this.cache.get(id);
+    if (!entity || !entity.filePath) {
+      Logger.warn(`deleteEntity() - Entity not found or no file path: ${id}`);
+      return false;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(entity.filePath);
+    if (!file || !(file instanceof TFile)) {
+      Logger.warn(`deleteEntity() - File not found: ${entity.filePath}`);
+      return false;
+    }
+
+    try {
+      await this.app.vault.trash(file, true);  // Move to trash
+      Logger.success(`deleteEntity() - Deleted: ${entity.filePath}`);
+      await this.refreshCache();
+      return true;
+    } catch (error) {
+      Logger.error(`deleteEntity() - Failed to delete: ${entity.filePath}`, error);
+      return false;
+    }
   }
 
   /**

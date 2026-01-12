@@ -770,12 +770,46 @@
   cursor: grabbing;
 }
 
+.week-task-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .week-task-card-title {
   font-weight: 500;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+
+.week-task-delete-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.week-task-card:hover .week-task-delete-btn {
+  opacity: 0.7;
+}
+
+.week-task-delete-btn:hover {
+  opacity: 1 !important;
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
 }
 
 .week-task-card-time {
@@ -973,4 +1007,993 @@ body.is-resizing-task * {
 
 body.is-resizing-task .week-task-card {
   opacity: 0.9;
+}
+
+/* ==================== Scale Selector ==================== */
+.timeline-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.timeline-title-row h2 {
+  margin: 0;
+  font-size: 1.2em;
+}
+
+.scale-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.scale-btn {
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85em;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.scale-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.scale-btn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* Action buttons */
+.timeline-action-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.timeline-action-btns button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  transition: all 0.15s ease;
+}
+
+.timeline-action-btns button:hover {
+  background: var(--background-secondary);
+}
+
+.timeline-action-btns button.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+.timeline-action-btns button.mod-cta:hover {
+  filter: brightness(1.1);
+}
+
+/* ==================== Month View ==================== */
+.month-grid {
+  background: var(--background-primary);
+}
+
+.month-header-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.month-header-cell {
+  padding: 12px 8px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.month-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.month-week-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.month-week-row:last-child {
+  border-bottom: none;
+}
+
+.month-day-cell {
+  min-height: 100px;
+  padding: 8px;
+  border-right: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.month-day-cell:last-child {
+  border-right: none;
+}
+
+.month-day-cell.is-today {
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+
+.month-day-cell.month-day-empty {
+  background: var(--background-secondary);
+  min-height: 100px;
+}
+
+.month-day-number {
+  font-weight: 600;
+  font-size: 0.9em;
+  margin-bottom: 8px;
+}
+
+.month-day-cell.is-today .month-day-number {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.month-day-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.month-task-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.month-task-dot:hover {
+  transform: scale(1.3);
+}
+
+.month-task-more {
+  font-size: 0.7em;
+  color: var(--text-muted);
+  padding: 2px 4px;
+}
+
+/* ==================== Year View ==================== */
+.year-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 16px;
+}
+
+.year-month-card {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.year-month-name {
+  font-weight: 600;
+  font-size: 0.9em;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.year-mini-calendar {
+  font-size: 0.7em;
+}
+
+.year-mini-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.year-mini-day-name {
+  text-align: center;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.year-mini-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.year-mini-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  cursor: default;
+}
+
+.year-mini-day.is-today {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.year-mini-day.has-task {
+  background: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+.year-mini-day.is-today.has-task {
+  background: var(--interactive-accent);
+}
+
+.year-mini-day-empty {
+  visibility: hidden;
+}
+
+/* ==================== Gantt/Timeline View ==================== */
+.gantt-container {
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.gantt-header {
+  display: flex;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.gantt-task-names-header {
+  width: 200px;
+  min-width: 200px;
+  padding: 12px;
+  font-weight: 600;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.gantt-timeline-header {
+  display: flex;
+  overflow-x: auto;
+}
+
+.gantt-month-header {
+  padding: 12px 8px;
+  text-align: center;
+  font-weight: 500;
+  font-size: 0.85em;
+  border-right: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+}
+
+.gantt-body {
+  display: flex;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.gantt-task-names {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.gantt-task-name {
+  padding: 8px 12px;
+  font-size: 0.85em;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--background-modifier-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gantt-timeline-body {
+  position: relative;
+  overflow-x: auto;
+  min-height: 100px;
+}
+
+.gantt-timeline-row {
+  height: 32px;
+  position: relative;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.gantt-bar {
+  position: absolute;
+  height: 20px;
+  top: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.gantt-bar:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 5;
+}
+
+.gantt-bar-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px 0 0 4px;
+}
+
+.gantt-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-red);
+  z-index: 5;
+}
+
+.gantt-grid-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--background-modifier-border);
+  opacity: 0.5;
+}
+
+/* ==================== Dependency Lines (Enhanced) ==================== */
+.dependency-line {
+  fill: none;
+  stroke: var(--text-accent);
+  stroke-width: 2;
+  opacity: 0.8;
+  transition: stroke-width 0.15s ease, opacity 0.15s ease;
+}
+
+.dependency-line:hover {
+  stroke-width: 3;
+  opacity: 1;
+}
+
+.dependency-drag-line {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  stroke-dasharray: 8, 4;
+  animation: dash-animation 0.5s linear infinite;
+}
+
+@keyframes dash-animation {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* ==================== Legend Create Button ==================== */
+.week-legend-create-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: all 0.15s ease;
+}
+
+.week-legend-create-btn:hover {
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+}
+
+/* ==================== Empty State Buttons ==================== */
+.empty-state-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.empty-state-buttons button {
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  transition: all 0.15s ease;
+}
+
+.empty-state-buttons button:hover {
+  background: var(--background-secondary);
+}
+
+.empty-state-buttons button.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* ==================== Mobile Responsive ==================== */
+@media (max-width: 768px) {
+  /* Container */
+  .timeline-viewer-container,
+  .wbs-viewer-container {
+    padding: 8px;
+  }
+
+  /* Header */
+  .timeline-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .timeline-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .scale-selector {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .scale-btn {
+    padding: 8px 10px;
+    font-size: 0.8em;
+    white-space: nowrap;
+  }
+
+  .week-nav {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .week-date-range {
+    min-width: auto;
+    font-size: 0.9em;
+  }
+
+  .timeline-action-btns {
+    width: 100%;
+  }
+
+  .timeline-action-btns button {
+    flex: 1;
+    padding: 10px 8px;
+    font-size: 0.85em;
+  }
+
+  /* Main layout */
+  .week-main-container {
+    flex-direction: column-reverse;
+  }
+
+  .week-legend {
+    width: 100%;
+    min-width: auto;
+  }
+
+  .week-legend-item {
+    display: inline-flex;
+    margin-right: 12px;
+  }
+
+  /* Week grid */
+  .week-header-row {
+    grid-template-columns: 40px repeat(7, 1fr);
+  }
+
+  .week-hour-row {
+    grid-template-columns: 40px repeat(7, 1fr);
+  }
+
+  .week-time-cell {
+    width: 40px;
+    min-width: 40px;
+    padding: 2px 4px;
+  }
+
+  .week-hour-label {
+    font-size: 0.6em;
+  }
+
+  .week-header-cell {
+    padding: 8px 2px;
+  }
+
+  .week-day-name {
+    font-size: 0.65em;
+  }
+
+  .week-day-number {
+    font-size: 1em;
+  }
+
+  .week-timegrid-wrapper {
+    max-height: 400px;
+  }
+
+  /* Task cards */
+  .week-task-card {
+    font-size: 0.7em;
+    padding: 2px 4px;
+  }
+
+  .week-task-card-time {
+    display: none;
+  }
+
+  /* Connection handles - larger for touch */
+  .connection-handle {
+    width: 16px;
+    height: 16px;
+    opacity: 0.7;
+  }
+
+  /* Resize handles - larger for touch */
+  .resize-handle {
+    height: 10px;
+    opacity: 0.5;
+  }
+
+  /* Month view */
+  .month-day-cell {
+    min-height: 60px;
+    padding: 4px;
+  }
+
+  .month-day-number {
+    font-size: 0.8em;
+  }
+
+  .month-task-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  /* Year view */
+  .year-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .year-month-card {
+    padding: 8px;
+  }
+
+  .year-mini-calendar {
+    font-size: 0.6em;
+  }
+
+  /* Gantt view */
+  .gantt-task-names-header,
+  .gantt-task-names {
+    width: 120px;
+    min-width: 120px;
+  }
+
+  .gantt-task-name {
+    font-size: 0.75em;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Even more compact for very small screens */
+  .scale-selector {
+    flex-wrap: nowrap;
+  }
+
+  .scale-btn {
+    padding: 6px 8px;
+    font-size: 0.75em;
+  }
+
+  .week-header-row {
+    grid-template-columns: 30px repeat(7, 1fr);
+  }
+
+  .week-hour-row {
+    grid-template-columns: 30px repeat(7, 1fr);
+  }
+
+  .week-time-cell {
+    width: 30px;
+    min-width: 30px;
+  }
+
+  .week-day-name {
+    font-size: 0.55em;
+  }
+
+  .week-day-number {
+    font-size: 0.9em;
+  }
+
+  /* Year view - single column */
+  .year-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Month view */
+  .month-header-cell {
+    font-size: 0.7em;
+    padding: 8px 2px;
+  }
+
+  .month-day-cell {
+    min-height: 50px;
+  }
+}
+
+/* Touch-friendly improvements */
+@media (pointer: coarse) {
+  .week-task-card {
+    min-height: 40px;
+  }
+
+  .connection-handle {
+    width: 20px;
+    height: 20px;
+    opacity: 0.6;
+  }
+
+  .resize-handle {
+    height: 12px;
+    opacity: 0.4;
+  }
+
+  .scale-btn {
+    padding: 10px 14px;
+  }
+
+  .week-nav-btn {
+    padding: 10px 16px;
+  }
+
+  .gantt-bar {
+    height: 28px;
+    top: 2px;
+  }
+
+  .gantt-timeline-row {
+    height: 40px;
+  }
+
+  .gantt-task-name {
+    height: 40px;
+  }
+}
+
+/* ==================== Dependency Graph View ==================== */
+.dependency-graph-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px;
+}
+
+.graph-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.graph-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.graph-title-row h2 {
+  margin: 0;
+  font-size: 1.2em;
+}
+
+.graph-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.graph-stat {
+  padding: 4px 10px;
+  background: var(--background-secondary);
+  border-radius: 12px;
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.graph-stat-critical {
+  background: color-mix(in srgb, var(--color-red) 15%, transparent);
+  color: var(--color-red);
+}
+
+.graph-stat-bottleneck {
+  background: color-mix(in srgb, var(--color-orange) 15%, transparent);
+  color: var(--color-orange);
+}
+
+.graph-stat-blocked {
+  background: color-mix(in srgb, var(--color-yellow) 15%, transparent);
+  color: var(--text-normal);
+}
+
+.graph-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.graph-control-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: all 0.15s ease;
+}
+
+.graph-control-btn:hover {
+  background: var(--background-secondary);
+  border-color: var(--interactive-accent);
+}
+
+/* Graph Canvas */
+.graph-canvas-container {
+  flex: 1;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.graph-svg {
+  display: block;
+}
+
+/* Graph Edges */
+.graph-edge {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 2;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+
+.graph-edge:hover {
+  opacity: 1;
+  stroke-width: 3;
+}
+
+.graph-edge-critical {
+  stroke: var(--color-red);
+  stroke-width: 3;
+  opacity: 0.9;
+}
+
+/* Graph Nodes */
+.graph-node {
+  fill: var(--background-primary);
+  stroke: var(--background-modifier-border);
+  stroke-width: 2;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.graph-node:hover {
+  stroke: var(--interactive-accent);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.15));
+}
+
+.graph-node-critical {
+  stroke: var(--color-red);
+  stroke-width: 3;
+}
+
+.graph-node-bottleneck {
+  stroke: var(--color-orange);
+  stroke-width: 3;
+}
+
+.graph-node-completed {
+  fill: color-mix(in srgb, var(--color-green) 10%, var(--background-primary));
+}
+
+.graph-node-in-progress {
+  fill: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+
+.graph-node-color {
+  clip-path: inset(0 round 8px 0 0 8px);
+}
+
+.graph-node-title {
+  fill: var(--text-normal);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.graph-node-status {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+.graph-node-progress-bg {
+  fill: var(--background-modifier-border);
+}
+
+.graph-node-progress-fill {
+  fill: var(--interactive-accent);
+}
+
+.graph-node-badge {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.graph-node-badge-critical {
+  fill: var(--color-red);
+}
+
+.graph-node-badge-bottleneck {
+  fill: var(--color-orange);
+}
+
+.graph-node-group {
+  cursor: pointer;
+}
+
+.graph-node-group:hover .graph-node {
+  stroke: var(--interactive-accent);
+}
+
+/* Graph Legend */
+.graph-legend {
+  display: flex;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+}
+
+.graph-legend-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+}
+
+.legend-critical {
+  border-color: var(--color-red);
+  background: color-mix(in srgb, var(--color-red) 15%, transparent);
+}
+
+.legend-bottleneck {
+  border-color: var(--color-orange);
+  background: color-mix(in srgb, var(--color-orange) 15%, transparent);
+}
+
+.legend-completed {
+  background: color-mix(in srgb, var(--color-green) 30%, transparent);
+}
+
+.legend-in-progress {
+  background: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+/* Empty State */
+.graph-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px;
+}
+
+.graph-empty-state p {
+  margin: 8px 0;
+}
+
+.graph-empty-state button {
+  margin-top: 16px;
+}
+
+/* Mobile Responsive for Graph */
+@media (max-width: 768px) {
+  .dependency-graph-container {
+    padding: 8px;
+  }
+
+  .graph-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .graph-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .graph-stats {
+    width: 100%;
+  }
+
+  .graph-stat {
+    font-size: 0.75em;
+    padding: 3px 8px;
+  }
+
+  .graph-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .graph-legend {
+    gap: 8px;
+  }
+
+  .graph-legend-item {
+    font-size: 0.75em;
+  }
 }
