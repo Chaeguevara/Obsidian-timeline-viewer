@@ -138,20 +138,24 @@ export default class TimelineViewerPlugin extends Plugin {
     }
   }
 
-  refreshViews(): void {
+  async refreshViews(): Promise<void> {
     // Refresh timeline view
     const timelineLeaves = this.app.workspace.getLeavesOfType(TIMELINE_VIEW_TYPE);
-    timelineLeaves.forEach(leaf => {
-      const view = leaf.view as TimelineView;
-      view.render();
-    });
+    for (const leaf of timelineLeaves) {
+      const view = leaf.view;
+      if (view instanceof TimelineView) {
+        await view.render();
+      }
+    }
 
     // Refresh WBS view
     const wbsLeaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
-    wbsLeaves.forEach(leaf => {
-      const view = leaf.view as WBSView;
-      view.render();
-    });
+    for (const leaf of wbsLeaves) {
+      const view = leaf.view;
+      if (view instanceof WBSView) {
+        await view.render();
+      }
+    }
   }
 
   /**
@@ -198,6 +202,22 @@ class CreateEntityModal extends Modal {
     const typeLabel = this.type.charAt(0).toUpperCase() + this.type.slice(1);
     contentEl.createEl('h2', { text: `Create New ${typeLabel}` });
 
+    // Show helpful context
+    const description = this.getDescriptionForType(this.type);
+    if (description) {
+      const descEl = contentEl.createDiv({ cls: 'timeline-modal-desc' });
+      descEl.createEl('p', { text: description });
+    }
+
+    // Show parent context if exists
+    if (this.parentId) {
+      const parent = this.plugin.dataService.getEntity(this.parentId);
+      if (parent) {
+        const parentInfo = contentEl.createDiv({ cls: 'timeline-modal-parent' });
+        parentInfo.createEl('small', { text: `Part of: ${parent.title}` });
+      }
+    }
+
     new Setting(contentEl)
       .setName('Title')
       .setDesc(`Name for the new ${this.type}`)
@@ -219,7 +239,25 @@ class CreateEntityModal extends Modal {
       .addButton(btn => btn
         .setButtonText('Create')
         .setCta()
-        .onClick(() => this.create()));
+        .onClick(() => this.create()))
+      .addButton(btn => btn
+        .setButtonText('Cancel')
+        .onClick(() => this.close()));
+  }
+
+  private getDescriptionForType(type: EntityType): string {
+    switch (type) {
+      case 'goal':
+        return 'A high-level objective you want to achieve. Goals contain portfolios.';
+      case 'portfolio':
+        return 'A collection of related projects working towards a goal. Portfolios contain projects.';
+      case 'project':
+        return 'A defined piece of work with start and end dates. Projects contain tasks.';
+      case 'task':
+        return 'An atomic unit of work that needs to be completed.';
+      default:
+        return '';
+    }
   }
 
   async create(): Promise<void> {
@@ -227,9 +265,25 @@ class CreateEntityModal extends Modal {
       return;
     }
 
-    await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
-    this.plugin.refreshViews();
-    this.close();
+    try {
+      await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
+      await this.plugin.refreshViews();
+      this.close();
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to create entity';
+      const { contentEl } = this;
+
+      // Show error message
+      const existingError = contentEl.querySelector('.timeline-error');
+      if (existingError) {
+        existingError.remove();
+      }
+
+      const errorEl = contentEl.createDiv({ cls: 'timeline-error' });
+      errorEl.createEl('p', { text: errorMsg, cls: 'mod-warning' });
+
+      console.error(`Failed to create ${this.type}:`, error);
+    }
   }
 
   onClose(): void {

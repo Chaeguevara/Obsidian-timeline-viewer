@@ -6,7 +6,7 @@ export const WBS_VIEW_TYPE = 'timeline-viewer-wbs';
 
 export class WBSView extends ItemView {
   plugin: TimelineViewerPlugin;
-  private contentEl: HTMLElement;
+  private viewContentEl: HTMLElement;
   private expandedNodes: Set<string> = new Set();
 
   constructor(leaf: WorkspaceLeaf, plugin: TimelineViewerPlugin) {
@@ -27,22 +27,22 @@ export class WBSView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    this.contentEl = this.containerEl.children[1] as HTMLElement;
-    this.contentEl.empty();
-    this.contentEl.addClass('wbs-viewer-container');
+    this.viewContentEl = this.containerEl.children[1] as HTMLElement;
+    this.viewContentEl.empty();
+    this.viewContentEl.addClass('wbs-viewer-container');
 
     await this.render();
   }
 
   async onClose(): Promise<void> {
-    this.contentEl.empty();
+    this.viewContentEl.empty();
   }
 
   async render(): Promise<void> {
-    this.contentEl.empty();
+    this.viewContentEl.empty();
 
     // Header
-    const header = this.contentEl.createDiv({ cls: 'wbs-header' });
+    const header = this.viewContentEl.createDiv({ cls: 'wbs-header' });
     header.createEl('h2', { text: 'Work Breakdown Structure' });
 
     // Controls
@@ -58,7 +58,7 @@ export class WBSView extends ItemView {
     addGoalBtn.addEventListener('click', () => this.plugin.createNewEntity('goal'));
 
     // WBS tree container
-    const treeContainer = this.contentEl.createDiv({ cls: 'wbs-tree' });
+    const treeContainer = this.viewContentEl.createDiv({ cls: 'wbs-tree' });
 
     this.renderTree(treeContainer);
   }
@@ -141,7 +141,7 @@ export class WBSView extends ItemView {
       addChildBtn.setAttribute('title', `Add ${this.getChildType(node.type)}`);
       addChildBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.addChild(node);
+        this.addChildNode(node);
       });
     }
 
@@ -216,7 +216,7 @@ export class WBSView extends ItemView {
     this.plugin.openEntity(id);
   }
 
-  private addChild(parentNode: WBSNode): void {
+  private addChildNode(parentNode: WBSNode): void {
     const childType = this.getChildType(parentNode.type);
     this.plugin.createNewEntity(childType, parentNode.id);
   }

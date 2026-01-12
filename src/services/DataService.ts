@@ -41,15 +41,21 @@ export class DataService {
   async refreshCache(): Promise<void> {
     this.cache.clear();
 
-    const folders = [
-      { folder: this.settings.goalsFolder, type: 'goal' as EntityType },
-      { folder: this.settings.portfoliosFolder, type: 'portfolio' as EntityType },
-      { folder: this.settings.projectsFolder, type: 'project' as EntityType },
-      { folder: this.settings.tasksFolder, type: 'task' as EntityType },
-    ];
+    if (this.settings.useNestedFolders) {
+      // Scan nested structure recursively
+      await this.scanFolderRecursive(this.settings.rootFolder);
+    } else {
+      // Scan flat structure
+      const folders = [
+        { folder: this.settings.goalsFolder, type: 'goal' as EntityType },
+        { folder: this.settings.portfoliosFolder, type: 'portfolio' as EntityType },
+        { folder: this.settings.projectsFolder, type: 'project' as EntityType },
+        { folder: this.settings.tasksFolder, type: 'task' as EntityType },
+      ];
 
-    for (const { folder, type } of folders) {
-      await this.scanFolder(folder, type);
+      for (const { folder, type } of folders) {
+        await this.scanFolder(folder, type);
+      }
     }
   }
 
@@ -69,12 +75,44 @@ export class DataService {
     }
   }
 
-  private async parseFile(file: TFile, expectedType: EntityType): Promise<Entity | null> {
+  /**
+   * Recursively scan folders for entities (for nested structure)
+   */
+  private async scanFolderRecursive(folderPath: string): Promise<void> {
+    const folder = this.app.vault.getAbstractFileByPath(normalizePath(folderPath));
+    if (!folder || !(folder instanceof TFolder)) {
+      return;
+    }
+
+    // Process all markdown files in this folder
+    const files = folder.children.filter((f): f is TFile => f instanceof TFile && f.extension === 'md');
+    for (const file of files) {
+      const entity = await this.parseFile(file);
+      if (entity) {
+        this.cache.set(entity.id, entity);
+      }
+    }
+
+    // Recursively process subfolders
+    const subfolders = folder.children.filter((f): f is TFolder => f instanceof TFolder);
+    for (const subfolder of subfolders) {
+      await this.scanFolderRecursive(subfolder.path);
+    }
+  }
+
+  private async parseFile(file: TFile, expectedType?: EntityType): Promise<Entity | null> {
     const metadata = this.app.metadataCache.getFileCache(file);
     const frontmatter = metadata?.frontmatter as EntityFrontmatter | undefined;
 
     if (!frontmatter) {
       return null;
+    }
+
+    // In nested structure, type comes from frontmatter
+    // In flat structure, type is provided as parameter
+    const type = frontmatter.type || expectedType;
+    if (!type) {
+      return null; // Skip files without type information
     }
 
     const baseEntity = {
@@ -86,8 +124,6 @@ export class DataService {
       updatedAt: frontmatter.updatedAt ? new Date(frontmatter.updatedAt) : new Date(file.stat.mtime),
       filePath: file.path,
     };
-
-    const type = frontmatter.type || expectedType;
 
     switch (type) {
       case 'goal':
@@ -112,8 +148,8 @@ export class DataService {
           type: 'project',
           portfolioId: this.extractLinkId(frontmatter.parent),
           taskIds: [],
-          startDate: frontmatter.startDate ? new Date(frontmatter.startDate) : undefined,
-          endDate: frontmatter.endDate ? new Date(frontmatter.endDate) : undefined,
+          startDate: this.parseDate(frontmatter.startDate),
+          endDate: this.parseDate(frontmatter.endDate),
           progress: frontmatter.progress || 0,
         } as Project;
 
@@ -122,8 +158,8 @@ export class DataService {
           ...baseEntity,
           type: 'task',
           projectId: this.extractLinkId(frontmatter.parent),
-          startDate: frontmatter.startDate ? new Date(frontmatter.startDate) : undefined,
-          dueDate: frontmatter.dueDate ? new Date(frontmatter.dueDate) : undefined,
+          startDate: this.parseDate(frontmatter.startDate),
+          dueDate: this.parseDate(frontmatter.dueDate),
           priority: (frontmatter.priority || 'medium') as Priority,
           dependencies: frontmatter.dependencies || [],
           progress: frontmatter.progress || 0,
@@ -134,11 +170,49 @@ export class DataService {
     }
   }
 
-  private extractLinkId(link: string | undefined): string | undefined {
+  private extractLinkId(link: unknown): string | undefined {
     if (!link) return undefined;
+
+    // Handle array (take first element)
+    if (Array.isArray(link)) {
+      link = link[0];
+    }
+
+    // Ensure link is a string
+    if (typeof link !== 'string') {
+      return undefined;
+    }
+
     // Extract ID from [[link]] format
     const match = link.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/);
     return match ? match[1] : link;
+  }
+
+  /**
+   * Safely parse a date value from frontmatter
+   * YAML can return Date objects, strings, or numbers
+   */
+  private parseDate(value: unknown): Date | undefined {
+    if (!value) return undefined;
+
+    // Already a Date object (YAML might auto-parse dates)
+    if (value instanceof Date) {
+      return isNaN(value.getTime()) ? undefined : value;
+    }
+
+    // String date (e.g., "2026-01-12")
+    if (typeof value === 'string') {
+      const date = new Date(value);
+      return isNaN(date.getTime()) ? undefined : date;
+    }
+
+    // Number (timestamp)
+    if (typeof value === 'number') {
+      const date = new Date(value);
+      return isNaN(date.getTime()) ? undefined : date;
+    }
+
+    return undefined;
   }
 
   /**
@@ -274,13 +348,15 @@ export class DataService {
    * Create a new entity file
    */
   async createEntity(type: EntityType, title: string, parentId?: string): Promise<Entity | null> {
-    const folder = this.getFolderForType(type);
+    const folder = this.getFolderForType(type, parentId);
     const folderPath = normalizePath(folder);
 
-    // Ensure folder exists
-    const existingFolder = this.app.vault.getAbstractFileByPath(folderPath);
-    if (!existingFolder) {
-      await this.app.vault.createFolder(folderPath);
+    // Ensure folder exists (creates parent directories recursively)
+    try {
+      await this.ensureFolderExists(folderPath);
+    } catch (error) {
+      console.error(`Failed to create folder ${folderPath}:`, error);
+      throw new Error(`Could not create folder for ${type}`);
     }
 
     const id = this.generateId();
@@ -301,34 +377,201 @@ export class DataService {
     if (type === 'task') {
       frontmatter.priority = 'medium';
       frontmatter.progress = 0;
+
+      // Set start time to now and end time to 1 hour later (default duration)
+      const taskStart = new Date();
+      const taskEnd = new Date(taskStart);
+      taskEnd.setHours(taskEnd.getHours() + 1); // Default 1 hour duration
+
+      frontmatter.startDate = taskStart.toISOString();
+      frontmatter.dueDate = taskEnd.toISOString();
     }
 
     if (type === 'project') {
       frontmatter.progress = 0;
+      frontmatter.status = 'in-progress';
+
+      // Add project timeline dates (26 days total for the sample tasks)
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(startDate.getDate() + 26);
+
+      frontmatter.startDate = startDate.toISOString().split('T')[0];
+      frontmatter.endDate = endDate.toISOString().split('T')[0];
     }
 
     const content = this.buildFileContent(frontmatter, title);
-    const filePath = normalizePath(`${folderPath}/${title}.md`);
 
-    await this.app.vault.create(filePath, content);
+    // Sanitize filename and ensure uniqueness
+    const fileName = this.sanitizeFileName(title);
+    const uniqueFilePath = await this.getUniqueFilePath(folderPath, fileName);
 
-    // Refresh cache to include new entity
+    try {
+      await this.app.vault.create(uniqueFilePath, content);
+    } catch (error) {
+      console.error(`Failed to create file ${uniqueFilePath}:`, error);
+      throw new Error(`Could not create ${type}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    // Auto-create sample tasks for new projects
+    // Note: We do this BEFORE refreshCache because the metadata cache
+    // hasn't indexed the new file yet, so getFolderForType would fail.
+    // We pass the project title directly to build the correct folder path.
+    if (type === 'project') {
+      await this.createSampleTasksForProject(id, title, folderPath);
+    }
+
+    // Refresh cache to include new entity and sample tasks
     await this.refreshCache();
 
     return this.cache.get(id) || null;
   }
 
-  private getFolderForType(type: EntityType): string {
+  /**
+   * Get folder path for an entity type
+   * Supports both nested and flat folder structures
+   */
+  private getFolderForType(type: EntityType, parentId?: string): string {
+    if (!this.settings.useNestedFolders) {
+      // Flat structure
+      switch (type) {
+        case 'goal': return this.settings.goalsFolder;
+        case 'portfolio': return this.settings.portfoliosFolder;
+        case 'project': return this.settings.projectsFolder;
+        case 'task': return this.settings.tasksFolder;
+      }
+    }
+
+    // Nested structure
+    const root = this.settings.rootFolder;
+
     switch (type) {
-      case 'goal': return this.settings.goalsFolder;
-      case 'portfolio': return this.settings.portfoliosFolder;
-      case 'project': return this.settings.projectsFolder;
-      case 'task': return this.settings.tasksFolder;
+      case 'goal':
+        return `${root}/Goals`;
+
+      case 'portfolio': {
+        if (parentId) {
+          const parent = this.cache.get(parentId);
+          if (parent) {
+            return `${root}/Goals/${parent.title}/Portfolios`;
+          }
+        }
+        return `${root}/Portfolios`;
+      }
+
+      case 'project': {
+        if (parentId) {
+          const parent = this.cache.get(parentId);
+          if (parent && parent.type === 'portfolio') {
+            // Get the portfolio's goal parent
+            const portfolio = parent as Portfolio;
+            if (portfolio.goalId) {
+              const goal = this.cache.get(portfolio.goalId);
+              if (goal) {
+                return `${root}/Goals/${goal.title}/Portfolios/${parent.title}/Projects`;
+              }
+            }
+            return `${root}/Portfolios/${parent.title}/Projects`;
+          }
+        }
+        return `${root}/Projects`;
+      }
+
+      case 'task': {
+        if (parentId) {
+          const parent = this.cache.get(parentId);
+          if (parent && parent.type === 'project') {
+            const project = parent as Project;
+            // Build the full path through the hierarchy
+            let projectPath = '';
+            if (project.portfolioId) {
+              const portfolio = this.cache.get(project.portfolioId) as Portfolio;
+              if (portfolio) {
+                if (portfolio.goalId) {
+                  const goal = this.cache.get(portfolio.goalId);
+                  if (goal) {
+                    projectPath = `${root}/Goals/${goal.title}/Portfolios/${portfolio.title}/Projects/${parent.title}`;
+                  }
+                } else {
+                  projectPath = `${root}/Portfolios/${portfolio.title}/Projects/${parent.title}`;
+                }
+              }
+            } else {
+              projectPath = `${root}/Projects/${parent.title}`;
+            }
+            return `${projectPath}/Tasks`;
+          }
+        }
+        return `${root}/Tasks`;
+      }
     }
   }
 
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Recursively create folder and all parent directories if they don't exist
+   */
+  private async ensureFolderExists(folderPath: string): Promise<void> {
+    const normalizedPath = normalizePath(folderPath);
+    const existingFolder = this.app.vault.getAbstractFileByPath(normalizedPath);
+
+    if (existingFolder) {
+      return; // Folder already exists
+    }
+
+    // Split path into parts and create each level
+    const parts = normalizedPath.split('/');
+    let currentPath = '';
+
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(currentPath);
+
+      if (!existing) {
+        try {
+          await this.app.vault.createFolder(currentPath);
+        } catch (error) {
+          // Folder might have been created by another process, check again
+          const checkAgain = this.app.vault.getAbstractFileByPath(currentPath);
+          if (!checkAgain) {
+            console.error(`Failed to create folder ${currentPath}:`, error);
+            throw error;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Sanitize filename by removing/replacing invalid characters
+   */
+  private sanitizeFileName(fileName: string): string {
+    // Remove or replace characters that are invalid in file names
+    return fileName
+      .replace(/[\\/:*?"<>|]/g, '-') // Replace invalid chars with dash
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim()
+      .substring(0, 200); // Limit length to avoid filesystem issues
+  }
+
+  /**
+   * Get a unique file path by adding a number suffix if file exists
+   */
+  private async getUniqueFilePath(folderPath: string, fileName: string): Promise<string> {
+    let filePath = normalizePath(`${folderPath}/${fileName}.md`);
+    let counter = 1;
+
+    // Check if file exists and increment counter until we find a unique name
+    while (this.app.vault.getAbstractFileByPath(filePath)) {
+      const baseName = fileName.replace(/\s*\d+$/, ''); // Remove trailing number if exists
+      filePath = normalizePath(`${folderPath}/${baseName} ${counter}.md`);
+      counter++;
+    }
+
+    return filePath;
   }
 
   private buildFileContent(frontmatter: Record<string, unknown>, title: string): string {
@@ -341,8 +584,202 @@ export class DataService {
         yamlLines.push(`${key}: ${value}`);
       }
     }
-    yamlLines.push('---', '', `# ${title}`, '', '');
-    return yamlLines.join('\n');
+    yamlLines.push('---', '');
+
+    // Add template content based on type
+    const type = frontmatter.type as EntityType;
+    const template = this.getTemplateContent(type, title);
+
+    return yamlLines.join('\n') + template;
+  }
+
+  /**
+   * Get template content for different entity types
+   */
+  private getTemplateContent(type: EntityType, title: string): string {
+    const sections: string[] = [`# ${title}`, ''];
+
+    switch (type) {
+      case 'goal':
+        sections.push(
+          '## Vision',
+          'What do you want to achieve?',
+          '',
+          '## Success Criteria',
+          '- [ ] Criterion 1',
+          '- [ ] Criterion 2',
+          '',
+          '## Key Results',
+          '1. ',
+          '2. ',
+          '',
+          '## Portfolios',
+          '_Portfolios working towards this goal will appear here_',
+          ''
+        );
+        break;
+
+      case 'portfolio':
+        sections.push(
+          '## Overview',
+          'Brief description of this portfolio',
+          '',
+          '## Objectives',
+          '- ',
+          '',
+          '## Projects',
+          '_Projects in this portfolio will appear here_',
+          ''
+        );
+        break;
+
+      case 'project':
+        sections.push(
+          '## Description',
+          'What is this project about?',
+          '',
+          '## Goals',
+          '- ',
+          '',
+          '## Timeline',
+          '- **Start Date:** ',
+          '- **End Date:** ',
+          '',
+          '## Tasks',
+          '_Tasks for this project will appear here_',
+          '',
+          '## Notes',
+          ''
+        );
+        break;
+
+      case 'task':
+        sections.push(
+          '## Description',
+          'What needs to be done?',
+          '',
+          '## Acceptance Criteria',
+          '- [ ] ',
+          '',
+          '## Notes',
+          ''
+        );
+        break;
+    }
+
+    return sections.join('\n');
+  }
+
+  /**
+   * Create sample tasks for a newly created project
+   * This helps populate the timeline view with initial data
+   * @param projectId - The ID of the new project
+   * @param projectTitle - The title of the project (used to build folder path)
+   * @param projectFolderPath - The folder path where the project was created
+   */
+  private async createSampleTasksForProject(
+    projectId: string,
+    projectTitle: string,
+    projectFolderPath: string
+  ): Promise<void> {
+    const today = new Date();
+
+    const sampleTasks = [
+      {
+        title: 'Planning and Requirements',
+        startDays: 0,
+        startHour: 9, // 9 AM
+        durationHours: 3, // 3 hour meeting
+        priority: 'high' as const,
+        status: 'in-progress' as const,
+      },
+      {
+        title: 'Design and Architecture',
+        startDays: 0,
+        startHour: 14, // 2 PM
+        durationHours: 2,
+        priority: 'high' as const,
+        status: 'not-started' as const,
+      },
+      {
+        title: 'Implementation',
+        startDays: 1,
+        startHour: 10, // 10 AM
+        durationHours: 4,
+        priority: 'medium' as const,
+        status: 'not-started' as const,
+      },
+      {
+        title: 'Testing and QA',
+        startDays: 2,
+        startHour: 9,
+        durationHours: 3,
+        priority: 'high' as const,
+        status: 'not-started' as const,
+      },
+      {
+        title: 'Documentation',
+        startDays: 2,
+        startHour: 14,
+        durationHours: 2,
+        priority: 'medium' as const,
+        status: 'not-started' as const,
+      },
+    ];
+
+    for (const taskSpec of sampleTasks) {
+      const startDate = new Date(today);
+      startDate.setDate(today.getDate() + taskSpec.startDays);
+      startDate.setHours(taskSpec.startHour, 0, 0, 0);
+
+      const endDate = new Date(startDate);
+      endDate.setHours(startDate.getHours() + taskSpec.durationHours);
+
+      const taskId = this.generateId();
+      const now = new Date().toISOString();
+
+      // Build task folder path directly using project info
+      // (We can't use getFolderForType because the project isn't in cache yet)
+      const sanitizedTitle = this.sanitizeFileName(projectTitle);
+      const taskFolderPath = this.settings.useNestedFolders
+        ? normalizePath(`${projectFolderPath}/${sanitizedTitle}/Tasks`)
+        : normalizePath(this.settings.tasksFolder);
+      const folderPath = taskFolderPath;
+
+      // Ensure folder exists (creates parent directories recursively)
+      try {
+        await this.ensureFolderExists(folderPath);
+      } catch (error) {
+        console.error(`Failed to create task folder ${folderPath}:`, error);
+        continue;
+      }
+
+      const frontmatter: Record<string, unknown> = {
+        type: 'task',
+        id: taskId,
+        status: taskSpec.status,
+        priority: taskSpec.priority,
+        progress: taskSpec.status === 'in-progress' ? 30 : 0,
+        startDate: startDate.toISOString(), // Full ISO with time
+        dueDate: endDate.toISOString(), // Full ISO with time
+        createdAt: now,
+        updatedAt: now,
+        parent: `[[${projectId}]]`,
+      };
+
+      const content = this.buildFileContent(frontmatter, taskSpec.title);
+      const fileName = this.sanitizeFileName(taskSpec.title);
+      const uniqueFilePath = await this.getUniqueFilePath(folderPath, fileName);
+
+      try {
+        await this.app.vault.create(uniqueFilePath, content);
+      } catch (error) {
+        console.error(`Failed to create sample task ${taskSpec.title}:`, error);
+      }
+    }
+
+    // Refresh cache after creating all sample tasks
+    await this.refreshCache();
   }
 
   /**
