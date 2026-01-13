@@ -13,8 +13,7 @@ export const WBS_VIEW_TYPE = 'timeline-viewer-wbs';
 
 export class WBSView extends ItemView {
   plugin: TimelineViewerPlugin;
-  private contentEl: HTMLElement;
-  private treeContainer: HTMLElement | null = null;
+  private viewContentEl: HTMLElement;
   private expandedNodes: Set<string> = new Set();
   private cleanupFunctions: (() => void)[] = [];
 
@@ -36,29 +35,22 @@ export class WBSView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    this.contentEl = this.containerEl.children[1] as HTMLElement;
-    this.contentEl.empty();
-    this.contentEl.addClass('wbs-viewer-container');
+    this.viewContentEl = this.containerEl.children[1] as HTMLElement;
+    this.viewContentEl.empty();
+    this.viewContentEl.addClass('wbs-viewer-container');
 
     await this.render();
   }
 
   async onClose(): Promise<void> {
-    // Cleanup touch handlers
-    this.cleanupFunctions.forEach(cleanup => cleanup());
-    this.cleanupFunctions = [];
-    this.contentEl.empty();
+    this.viewContentEl.empty();
   }
 
   async render(): Promise<void> {
-    // Cleanup previous handlers
-    this.cleanupFunctions.forEach(cleanup => cleanup());
-    this.cleanupFunctions = [];
-
-    this.contentEl.empty();
+    this.viewContentEl.empty();
 
     // Header
-    const header = this.contentEl.createDiv({ cls: 'wbs-header' });
+    const header = this.viewContentEl.createDiv({ cls: 'wbs-header' });
     header.createEl('h2', { text: 'Work Breakdown Structure' });
 
     // Controls
@@ -83,10 +75,7 @@ export class WBSView extends ItemView {
     });
 
     // WBS tree container
-    this.treeContainer = this.contentEl.createDiv({ cls: 'wbs-tree' });
-
-    // Setup touch gestures on tree container
-    this.setupTouchGestures();
+    const treeContainer = this.viewContentEl.createDiv({ cls: 'wbs-tree' });
 
     this.renderTree();
 
@@ -228,8 +217,7 @@ export class WBSView extends ItemView {
       addChildBtn.setAttribute('aria-label', `Add ${this.getChildType(node.type)}`);
       addChildBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        hapticFeedback('light');
-        this.addChild(node);
+        this.addChildNode(node);
       });
     }
 
@@ -470,7 +458,7 @@ export class WBSView extends ItemView {
     this.plugin.openEntity(id);
   }
 
-  private addChild(parentNode: WBSNode): void {
+  private addChildNode(parentNode: WBSNode): void {
     const childType = this.getChildType(parentNode.type);
     // Auto-expand parent when adding child
     this.expandedNodes.add(parentNode.id);

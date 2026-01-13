@@ -3,6 +3,10 @@ import type TimelineViewerPlugin from './main';
 
 export interface TimelineViewerSettings {
   // Folder settings
+  rootFolder: string; // Root folder for all timeline viewer files
+  useNestedFolders: boolean; // Whether to use nested folder structure
+
+  // Legacy flat folder settings (kept for backwards compatibility)
   goalsFolder: string;
   portfoliosFolder: string;
   projectsFolder: string;
@@ -30,6 +34,8 @@ export interface TimelineViewerSettings {
 }
 
 export const DEFAULT_SETTINGS: TimelineViewerSettings = {
+  rootFolder: 'Timeline Viewer',
+  useNestedFolders: true,
   goalsFolder: 'Goals',
   portfoliosFolder: 'Portfolios',
   projectsFolder: 'Projects',
@@ -70,8 +76,29 @@ export class TimelineViewerSettingTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: 'Folders' });
 
     new Setting(containerEl)
+      .setName('Root folder')
+      .setDesc('Root folder for all Timeline Viewer files')
+      .addText(text => text
+        .setPlaceholder('Timeline Viewer')
+        .setValue(this.plugin.settings.rootFolder)
+        .onChange(async (value) => {
+          this.plugin.settings.rootFolder = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Use nested folders')
+      .setDesc('Organize files hierarchically: Goals > Portfolios > Projects > Tasks')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.useNestedFolders)
+        .onChange(async (value) => {
+          this.plugin.settings.useNestedFolders = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
       .setName('Goals folder')
-      .setDesc('Folder where goal files are stored')
+      .setDesc('Folder where goal files are stored (flat structure only)')
       .addText(text => text
         .setPlaceholder('Goals')
         .setValue(this.plugin.settings.goalsFolder)

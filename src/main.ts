@@ -2,22 +2,42 @@ import { Plugin, Modal, Setting } from 'obsidian';
 import { TimelineViewerSettings, DEFAULT_SETTINGS, TimelineViewerSettingTab } from './settings';
 import { TimelineView, TIMELINE_VIEW_TYPE } from './views/TimelineView';
 import { WBSView, WBS_VIEW_TYPE } from './views/WBSView';
-import { BoardView, BOARD_VIEW_TYPE } from './views/BoardView';
-import { ListView, LIST_VIEW_TYPE } from './views/ListView';
-import { MyTasksView, MY_TASKS_VIEW_TYPE } from './views/MyTasksView';
+import { DependencyGraphView, DEPENDENCY_GRAPH_VIEW_TYPE } from './views/DependencyGraphView';
 import { DataService } from './services/DataService';
 import type { EntityType } from './models/types';
+import { Logger } from './utils/Logger';
 
 export default class TimelineViewerPlugin extends Plugin {
   settings: TimelineViewerSettings;
   dataService: DataService;
 
   async onload(): Promise<void> {
+    Logger.info('TimelineViewerPlugin.onload() - START');
     await this.loadSettings();
 
     // Initialize data service
+    Logger.info('Initializing DataService...');
     this.dataService = new DataService(this.app, this.settings);
+
+    // Wait for layout to be ready before initializing data
+    // This ensures the metadata cache is populated
+    this.app.workspace.onLayoutReady(async () => {
+      Logger.info('Layout ready - initializing data...');
+      await this.dataService.initialize();
+      Logger.success('DataService initialized after layout ready');
+
+      // Also listen for metadata cache resolution for late-loading files
+      this.registerEvent(
+        this.app.metadataCache.on('resolved', async () => {
+          Logger.debug('Metadata cache resolved - refreshing cache');
+          await this.dataService.refreshCache();
+        })
+      );
+    });
+
+    // Initial quick init (may be incomplete if metadata not ready)
     await this.dataService.initialize();
+    Logger.success('DataService initial load complete');
 
     // Register views
     this.registerView(
@@ -31,18 +51,8 @@ export default class TimelineViewerPlugin extends Plugin {
     );
 
     this.registerView(
-      BOARD_VIEW_TYPE,
-      (leaf) => new BoardView(leaf, this)
-    );
-
-    this.registerView(
-      LIST_VIEW_TYPE,
-      (leaf) => new ListView(leaf, this)
-    );
-
-    this.registerView(
-      MY_TASKS_VIEW_TYPE,
-      (leaf) => new MyTasksView(leaf, this)
+      DEPENDENCY_GRAPH_VIEW_TYPE,
+      (leaf) => new DependencyGraphView(leaf, this)
     );
 
     // Add ribbon icons
@@ -54,16 +64,8 @@ export default class TimelineViewerPlugin extends Plugin {
       this.activateView(WBS_VIEW_TYPE);
     });
 
-    this.addRibbonIcon('layout-dashboard', 'Open Board View', () => {
-      this.activateView(BOARD_VIEW_TYPE);
-    });
-
-    this.addRibbonIcon('list', 'Open List View', () => {
-      this.activateView(LIST_VIEW_TYPE);
-    });
-
-    this.addRibbonIcon('check-square', 'Open My Tasks', () => {
-      this.activateView(MY_TASKS_VIEW_TYPE);
+    this.addRibbonIcon('git-branch', 'Open Dependency Graph', () => {
+      this.activateView(DEPENDENCY_GRAPH_VIEW_TYPE);
     });
 
     // Add commands
@@ -80,21 +82,9 @@ export default class TimelineViewerPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: 'open-board-view',
-      name: 'Open Board View',
-      callback: () => this.activateView(BOARD_VIEW_TYPE),
-    });
-
-    this.addCommand({
-      id: 'open-list-view',
-      name: 'Open List View',
-      callback: () => this.activateView(LIST_VIEW_TYPE),
-    });
-
-    this.addCommand({
-      id: 'open-my-tasks',
-      name: 'Open My Tasks',
-      callback: () => this.activateView(MY_TASKS_VIEW_TYPE),
+      id: 'open-dependency-graph',
+      name: 'Open Dependency Graph',
+      callback: () => this.activateView(DEPENDENCY_GRAPH_VIEW_TYPE),
     });
 
     this.addCommand({
@@ -135,22 +125,27 @@ export default class TimelineViewerPlugin extends Plugin {
 
     // Register file events for auto-refresh
     this.registerEvent(
-      this.app.vault.on('modify', () => {
+      this.app.vault.on('modify', (file) => {
+        Logger.debug(`File modified: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
 
     this.registerEvent(
-      this.app.vault.on('create', () => {
+      this.app.vault.on('create', (file) => {
+        Logger.debug(`File created: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
 
     this.registerEvent(
-      this.app.vault.on('delete', () => {
+      this.app.vault.on('delete', (file) => {
+        Logger.debug(`File deleted: ${file.path}`);
         this.dataService.refreshCache();
       })
     );
+
+    Logger.success('TimelineViewerPlugin.onload() - END');
   }
 
   onunload(): void {
@@ -189,41 +184,30 @@ export default class TimelineViewerPlugin extends Plugin {
     }
   }
 
-  refreshViews(): void {
+  async refreshViews(): Promise<void> {
+    Logger.info('refreshViews() - START');
     // Refresh timeline view
     const timelineLeaves = this.app.workspace.getLeavesOfType(TIMELINE_VIEW_TYPE);
-    timelineLeaves.forEach(leaf => {
-      const view = leaf.view as TimelineView;
-      view.render();
-    });
+    Logger.debug(`refreshViews() - Found ${timelineLeaves.length} timeline views`);
+    for (const leaf of timelineLeaves) {
+      const view = leaf.view;
+      if (view instanceof TimelineView) {
+        Logger.debug('refreshViews() - Rendering timeline view...');
+        await view.render();
+      }
+    }
 
     // Refresh WBS view
     const wbsLeaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
-    wbsLeaves.forEach(leaf => {
-      const view = leaf.view as WBSView;
-      view.render();
-    });
-
-    // Refresh Board view
-    const boardLeaves = this.app.workspace.getLeavesOfType(BOARD_VIEW_TYPE);
-    boardLeaves.forEach(leaf => {
-      const view = leaf.view as BoardView;
-      view.render();
-    });
-
-    // Refresh List view
-    const listLeaves = this.app.workspace.getLeavesOfType(LIST_VIEW_TYPE);
-    listLeaves.forEach(leaf => {
-      const view = leaf.view as ListView;
-      view.render();
-    });
-
-    // Refresh My Tasks view
-    const myTasksLeaves = this.app.workspace.getLeavesOfType(MY_TASKS_VIEW_TYPE);
-    myTasksLeaves.forEach(leaf => {
-      const view = leaf.view as MyTasksView;
-      view.render();
-    });
+    Logger.debug(`refreshViews() - Found ${wbsLeaves.length} WBS views`);
+    for (const leaf of wbsLeaves) {
+      const view = leaf.view;
+      if (view instanceof WBSView) {
+        Logger.debug('refreshViews() - Rendering WBS view...');
+        await view.render();
+      }
+    }
+    Logger.success('refreshViews() - END');
   }
 
   /**
@@ -277,6 +261,22 @@ class CreateEntityModal extends Modal {
     const typeLabel = this.type.charAt(0).toUpperCase() + this.type.slice(1);
     contentEl.createEl('h2', { text: `Create New ${typeLabel}` });
 
+    // Show helpful context
+    const description = this.getDescriptionForType(this.type);
+    if (description) {
+      const descEl = contentEl.createDiv({ cls: 'timeline-modal-desc' });
+      descEl.createEl('p', { text: description });
+    }
+
+    // Show parent context if exists
+    if (this.parentId) {
+      const parent = this.plugin.dataService.getEntity(this.parentId);
+      if (parent) {
+        const parentInfo = contentEl.createDiv({ cls: 'timeline-modal-parent' });
+        parentInfo.createEl('small', { text: `Part of: ${parent.title}` });
+      }
+    }
+
     new Setting(contentEl)
       .setName('Title')
       .setDesc(`Name for the new ${this.type}`)
@@ -298,17 +298,55 @@ class CreateEntityModal extends Modal {
       .addButton(btn => btn
         .setButtonText('Create')
         .setCta()
-        .onClick(() => this.create()));
+        .onClick(() => this.create()))
+      .addButton(btn => btn
+        .setButtonText('Cancel')
+        .onClick(() => this.close()));
+  }
+
+  private getDescriptionForType(type: EntityType): string {
+    switch (type) {
+      case 'goal':
+        return 'A high-level objective you want to achieve. Goals contain portfolios.';
+      case 'portfolio':
+        return 'A collection of related projects working towards a goal. Portfolios contain projects.';
+      case 'project':
+        return 'A defined piece of work with start and end dates. Projects contain tasks.';
+      case 'task':
+        return 'An atomic unit of work that needs to be completed.';
+      default:
+        return '';
+    }
   }
 
   async create(): Promise<void> {
     if (!this.title.trim()) {
+      Logger.warn('CreateEntityModal.create() - Empty title, aborting');
       return;
     }
 
-    await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
-    this.plugin.refreshViews();
-    this.close();
+    Logger.info(`CreateEntityModal.create() - Creating ${this.type}: "${this.title.trim()}"`);
+    try {
+      const entity = await this.plugin.dataService.createEntity(this.type, this.title.trim(), this.parentId);
+      Logger.success(`CreateEntityModal.create() - Entity created: ${entity?.id || 'unknown'}`);
+      Logger.info('CreateEntityModal.create() - Refreshing views...');
+      await this.plugin.refreshViews();
+      Logger.success('CreateEntityModal.create() - Views refreshed');
+      this.close();
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Failed to create entity';
+      Logger.error(`CreateEntityModal.create() - Failed: ${errorMsg}`, error);
+      const { contentEl } = this;
+
+      // Show error message
+      const existingError = contentEl.querySelector('.timeline-error');
+      if (existingError) {
+        existingError.remove();
+      }
+
+      const errorEl = contentEl.createDiv({ cls: 'timeline-error' });
+      errorEl.createEl('p', { text: errorMsg, cls: 'mod-warning' });
+    }
   }
 
   onClose(): void {

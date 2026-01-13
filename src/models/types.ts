@@ -250,12 +250,7 @@ export interface TimelineItem {
   endDate: Date;
   progress: number;
   status: Status;
-  priority?: Priority;
-  assignee?: string;
-  dependencies?: Dependency[];
-  isMilestone?: boolean;
-  isBlocker?: boolean; // Blocks other tasks
-  isBlocked?: boolean; // Blocked by incomplete dependencies
+  projectId?: string;  // Parent project ID for tasks
   children?: TimelineItem[];
   color?: string;
 }
