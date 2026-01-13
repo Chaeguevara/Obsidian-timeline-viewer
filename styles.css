@@ -3,17 +3,33 @@
 
 /* ==================== CSS Variables ==================== */
 :root {
+  /* Spacing */
   --tv-touch-target: 44px;
   --tv-spacing-xs: 4px;
   --tv-spacing-sm: 8px;
   --tv-spacing-md: 12px;
   --tv-spacing-lg: 16px;
   --tv-spacing-xl: 24px;
+
+  /* Typography */
   --tv-font-size-sm: 14px;
   --tv-font-size-md: 16px;
   --tv-font-size-lg: 18px;
+
+  /* Effects */
   --tv-border-radius: 8px;
   --tv-transition: 0.2s ease;
+
+  /* Z-index scale - prevents stacking conflicts */
+  --tv-z-base: 1;
+  --tv-z-dropdown: 50;
+  --tv-z-sticky: 60;
+  --tv-z-overlay: 70;
+  --tv-z-modal: 80;
+  --tv-z-popover: 90;
+  --tv-z-fab: 95;
+  --tv-z-tooltip: 100;
+  --tv-z-context-menu: 110;
 }
 
 /* ==================== Common ==================== */
@@ -514,6 +530,21 @@
   flex-wrap: wrap;
 }
 
+.board-btn {
+  min-height: var(--tv-touch-target);
+  padding: var(--tv-spacing-sm) var(--tv-spacing-md);
+  border-radius: var(--tv-border-radius);
+  border: none;
+  cursor: pointer;
+  font-size: var(--tv-font-size-md);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.board-btn.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
 .board-content {
   flex: 1;
   overflow-x: auto;
@@ -659,6 +690,100 @@
   text-align: center;
   padding: var(--tv-spacing-xl);
   color: var(--text-muted);
+}
+
+/* Board column add button */
+.board-column-add {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 18px;
+  transition: background var(--tv-transition), color var(--tv-transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.board-column-add:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.board-column-add:active {
+  background: var(--background-modifier-active-hover);
+}
+
+/* Board column empty state */
+.board-column-empty {
+  text-align: center;
+  padding: var(--tv-spacing-lg);
+  color: var(--text-muted);
+  font-size: var(--tv-font-size-sm);
+  font-style: italic;
+}
+
+/* Board task progress bar */
+.board-task-progress {
+  height: 4px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  margin-top: var(--tv-spacing-sm);
+  overflow: hidden;
+}
+
+.board-task-progress-fill {
+  height: 100%;
+  background: var(--interactive-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Board task tags */
+.board-task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tv-spacing-xs);
+  margin-top: var(--tv-spacing-sm);
+}
+
+.board-task-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+/* Board context menu */
+.board-context-menu {
+  animation: contextMenuFadeIn 0.15s ease;
+  z-index: var(--tv-z-context-menu);
+}
+
+.board-context-menu-item {
+  transition: background var(--tv-transition);
+}
+
+.board-context-menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.board-context-menu-item:active {
+  background: var(--background-modifier-active-hover);
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* ==================== List View (Table) ==================== */
@@ -848,6 +973,77 @@
   text-align: center;
   padding: var(--tv-spacing-xl);
   color: var(--text-muted);
+}
+
+/* List cell title wrapper */
+.list-cell-title {
+  display: flex;
+  align-items: center;
+  gap: var(--tv-spacing-sm);
+}
+
+/* List complete button */
+.list-complete-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 16px;
+  border-radius: 50%;
+  transition: background var(--tv-transition), color var(--tv-transition);
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.list-complete-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.list-task-completed .list-complete-btn {
+  color: var(--color-green);
+}
+
+/* List row overdue styling */
+.list-row-overdue {
+  background: rgba(var(--color-red-rgb), 0.05);
+}
+
+/* List context menu */
+.list-context-menu {
+  animation: contextMenuFadeIn 0.15s ease;
+  z-index: var(--tv-z-context-menu);
+}
+
+.list-context-menu-item {
+  transition: background var(--tv-transition);
+}
+
+.list-context-menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.list-context-menu-item:active {
+  background: var(--background-modifier-active-hover);
+}
+
+/* List button */
+.list-btn {
+  min-height: var(--tv-touch-target);
+  padding: var(--tv-spacing-sm) var(--tv-spacing-md);
+  border-radius: var(--tv-border-radius);
+  border: none;
+  cursor: pointer;
+  font-size: var(--tv-font-size-md);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.list-btn.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
 }
 
 /* ==================== My Tasks View ==================== */
@@ -1401,7 +1597,7 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: transform var(--tv-transition), box-shadow var(--tv-transition);
-  z-index: 100;
+  z-index: var(--tv-z-fab);
 }
 
 .tv-fab:active {

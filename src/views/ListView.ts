@@ -121,59 +121,72 @@ export class ListView extends ItemView {
   private renderTable(container: HTMLElement): void {
     const tasks = this.getSortedTasks();
 
-    // Create table
-    const table = container.createDiv({ cls: 'list-table' });
+    // Use wrapper for horizontal scrolling
+    const tableWrapper = container.createDiv({ cls: 'list-table-wrapper' });
 
-    // Set grid template
-    const gridCols = isMobile()
-      ? '40px 1fr 80px 60px' // Simplified for mobile
-      : COLUMNS.map(c => c.width).join(' ');
-    table.style.gridTemplateColumns = gridCols;
-
-    // Header row
-    const headerRow = table.createDiv({ cls: 'list-header-row' });
+    // Create actual table element for proper semantics
+    const table = tableWrapper.createEl('table', { cls: 'list-table' });
+    table.setAttribute('role', 'grid');
 
     const visibleColumns = isMobile()
       ? COLUMNS.filter(c => ['checkbox', 'title', 'dueDate', 'priority'].includes(c.key as string))
       : COLUMNS;
 
+    // Table header
+    const thead = table.createEl('thead');
+    const headerRow = thead.createEl('tr', { cls: 'list-header-row' });
+
     visibleColumns.forEach(col => {
-      const cell = headerRow.createDiv({ cls: 'list-header-cell' });
+      const th = headerRow.createEl('th');
+      th.style.width = col.width;
 
       if (col.key === 'checkbox') {
-        const selectAll = cell.createEl('input', { type: 'checkbox', cls: 'list-checkbox' });
+        const selectAll = th.createEl('input', { type: 'checkbox', cls: 'list-checkbox' });
+        selectAll.setAttribute('aria-label', 'Select all tasks');
         selectAll.addEventListener('change', () => this.toggleSelectAll(selectAll.checked, tasks));
       } else {
-        cell.setText(col.label);
+        th.setText(col.label);
 
         if (col.sortable) {
-          cell.addClass('list-header-sortable');
+          th.addClass('list-header-sortable');
+          th.setAttribute('role', 'columnheader');
+          th.setAttribute('aria-sort', this.sortOptions.field === col.key
+            ? (this.sortOptions.direction === 'asc' ? 'ascending' : 'descending')
+            : 'none');
+
           if (this.sortOptions.field === col.key) {
-            cell.addClass(`list-header-sorted-${this.sortOptions.direction}`);
+            th.addClass('sorted');
+            if (this.sortOptions.direction === 'desc') {
+              th.addClass('desc');
+            }
           }
-          cell.addEventListener('click', () => this.handleSort(col.key as keyof Task));
+          th.addEventListener('click', () => this.handleSort(col.key as keyof Task));
         }
       }
     });
 
-    // Data rows
+    // Table body
+    const tbody = table.createEl('tbody');
+
     if (tasks.length === 0) {
-      const emptyRow = table.createDiv({ cls: 'list-empty-row' });
-      emptyRow.style.gridColumn = `1 / -1`;
-      emptyRow.setText('No tasks found. Create your first task!');
+      const emptyRow = tbody.createEl('tr', { cls: 'list-empty-row' });
+      const emptyCell = emptyRow.createEl('td');
+      emptyCell.colSpan = visibleColumns.length;
+      emptyCell.addClass('list-empty-state');
+      emptyCell.setText('No tasks found. Create your first task!');
     } else {
       tasks.forEach(task => {
-        this.renderRow(table, task, visibleColumns);
+        this.renderRow(tbody, task, visibleColumns);
       });
     }
   }
 
-  private renderRow(table: HTMLElement, task: Task, columns: ListColumn[]): void {
-    const row = table.createDiv({ cls: 'list-row' });
+  private renderRow(tbody: HTMLElement, task: Task, columns: ListColumn[]): void {
+    const row = tbody.createEl('tr');
     row.dataset.taskId = task.id;
 
     if (task.status === 'completed') {
-      row.addClass('list-row-completed');
+      row.addClass('list-task-completed');
     }
 
     const isOverdue = task.dueDate && task.dueDate < new Date() && task.status !== 'completed';
@@ -182,12 +195,13 @@ export class ListView extends ItemView {
     }
 
     columns.forEach(col => {
-      const cell = row.createDiv({ cls: 'list-cell' });
+      const cell = row.createEl('td');
 
       switch (col.key) {
         case 'checkbox':
           const checkbox = cell.createEl('input', { type: 'checkbox', cls: 'list-checkbox' });
           checkbox.checked = this.selectedTasks.has(task.id);
+          checkbox.setAttribute('aria-label', `Select ${task.title}`);
           checkbox.addEventListener('change', () => this.toggleSelect(task.id, checkbox.checked));
           break;
 
@@ -197,13 +211,15 @@ export class ListView extends ItemView {
           // Complete button
           const completeBtn = titleWrapper.createSpan({ cls: 'list-complete-btn' });
           completeBtn.setText(task.status === 'completed' ? '✓' : '○');
+          completeBtn.setAttribute('role', 'button');
+          completeBtn.setAttribute('aria-label', task.status === 'completed' ? 'Mark incomplete' : 'Mark complete');
           completeBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             hapticFeedback('light');
             this.toggleComplete(task);
           });
 
-          const titleText = titleWrapper.createSpan({ cls: 'list-title-text', text: task.title });
+          const titleText = titleWrapper.createSpan({ cls: 'list-task-title', text: task.title });
           titleText.addEventListener('click', () => {
             hapticFeedback('light');
             this.plugin.openEntity(task.id);
@@ -236,9 +252,10 @@ export class ListView extends ItemView {
 
         case 'dueDate':
           if (task.dueDate) {
+            cell.addClass('list-date');
             cell.setText(this.formatDate(task.dueDate));
             if (isOverdue) {
-              cell.addClass('list-cell-overdue');
+              cell.addClass('overdue');
             }
           } else {
             cell.setText('—');
@@ -251,8 +268,8 @@ export class ListView extends ItemView {
           break;
 
         case 'status':
-          cell.setText(STATUS_LABELS[task.status]);
-          cell.addClass(`list-cell-status-${task.status}`);
+          const statusSpan = cell.createSpan({ cls: `list-status list-status-${task.status}` });
+          statusSpan.setText(STATUS_LABELS[task.status]);
           break;
       }
     });

@@ -93,10 +93,15 @@ export class BoardView extends ItemView {
 
     const column = container.createDiv({ cls: 'board-column' });
     column.dataset.status = columnDef.status;
+    column.setAttribute('role', 'listbox');
+    column.setAttribute('aria-label', `${columnDef.title} tasks`);
 
     // Column header
     const columnHeader = column.createDiv({ cls: 'board-column-header' });
-    columnHeader.style.borderTopColor = columnDef.color;
+
+    // Color indicator
+    const colorDot = columnHeader.createDiv({ cls: 'board-column-color' });
+    colorDot.style.backgroundColor = columnDef.color;
 
     const titleEl = columnHeader.createSpan({ cls: 'board-column-title' });
     titleEl.setText(columnDef.title);
@@ -105,14 +110,17 @@ export class BoardView extends ItemView {
     countEl.setText(`${tasks.length}`);
 
     // Quick add button
-    const quickAddBtn = columnHeader.createSpan({ cls: 'board-column-add', text: '+' });
+    const quickAddBtn = columnHeader.createSpan({ cls: 'board-column-add' });
+    quickAddBtn.setText('+');
+    quickAddBtn.setAttribute('role', 'button');
+    quickAddBtn.setAttribute('aria-label', `Add task to ${columnDef.title}`);
     quickAddBtn.addEventListener('click', () => {
       hapticFeedback('light');
       this.quickAddTask(columnDef.status);
     });
 
-    // Column body (droppable)
-    const columnBody = column.createDiv({ cls: 'board-column-body' });
+    // Column body (droppable) - use correct CSS class
+    const columnBody = column.createDiv({ cls: 'board-column-tasks' });
     this.setupDropZone(columnBody, columnDef.status);
 
     // Render task cards
@@ -128,15 +136,15 @@ export class BoardView extends ItemView {
   }
 
   private renderTaskCard(container: HTMLElement, task: Task): void {
-    const card = container.createDiv({ cls: 'board-card' });
+    // Use correct CSS class: board-task-card (matches styles.css)
+    const card = container.createDiv({ cls: `board-task-card priority-${task.priority}` });
     card.dataset.taskId = task.id;
     card.draggable = true;
-
-    // Priority indicator
-    const priorityEl = card.createDiv({ cls: `board-card-priority board-card-priority-${task.priority}` });
+    card.setAttribute('role', 'option');
+    card.setAttribute('aria-label', task.title);
 
     // Title
-    const titleEl = card.createDiv({ cls: 'board-card-title' });
+    const titleEl = card.createDiv({ cls: 'board-task-title' });
     titleEl.setText(task.title);
     titleEl.addEventListener('click', () => {
       hapticFeedback('light');
@@ -144,36 +152,45 @@ export class BoardView extends ItemView {
     });
 
     // Meta row
-    const metaEl = card.createDiv({ cls: 'board-card-meta' });
+    const metaEl = card.createDiv({ cls: 'board-task-meta' });
 
     // Due date
     if (task.dueDate) {
-      const dueEl = metaEl.createSpan({ cls: 'board-card-due' });
+      const dueEl = metaEl.createSpan({ cls: 'board-task-due' });
       const isOverdue = task.dueDate < new Date() && task.status !== 'completed';
       if (isOverdue) {
-        dueEl.addClass('board-card-due-overdue');
+        dueEl.addClass('overdue');
       }
       dueEl.setText(`📅 ${this.formatDate(task.dueDate)}`);
     }
 
     // Assignee
     if (task.assignee) {
-      const assigneeEl = metaEl.createSpan({ cls: 'board-card-assignee' });
+      const assigneeEl = metaEl.createSpan({ cls: 'board-task-assignee' });
       assigneeEl.setText(`👤 ${this.extractName(task.assignee)}`);
     }
 
-    // Progress
+    // Project
+    if (task.projectId) {
+      const project = this.plugin.dataService.getEntity(task.projectId);
+      if (project) {
+        const projectEl = metaEl.createSpan({ cls: 'board-task-project' });
+        projectEl.setText(project.title);
+      }
+    }
+
+    // Progress bar
     if (task.progress > 0 && task.progress < 100) {
-      const progressEl = card.createDiv({ cls: 'board-card-progress' });
-      const progressBar = progressEl.createDiv({ cls: 'board-card-progress-bar' });
+      const progressEl = card.createDiv({ cls: 'board-task-progress' });
+      const progressBar = progressEl.createDiv({ cls: 'board-task-progress-fill' });
       progressBar.style.width = `${task.progress}%`;
     }
 
     // Tags
     if (task.tags && task.tags.length > 0) {
-      const tagsEl = card.createDiv({ cls: 'board-card-tags' });
+      const tagsEl = card.createDiv({ cls: 'board-task-tags' });
       task.tags.slice(0, 3).forEach(tag => {
-        tagsEl.createSpan({ cls: 'board-card-tag', text: tag });
+        tagsEl.createSpan({ cls: 'board-task-tag', text: tag });
       });
     }
 
@@ -192,41 +209,52 @@ export class BoardView extends ItemView {
     card.addEventListener('dragstart', (e) => {
       this.draggedTask = task;
       this.draggedElement = card;
-      card.classList.add('board-card-dragging');
+      card.classList.add('dragging');
       e.dataTransfer?.setData('text/plain', task.id);
     });
 
     card.addEventListener('dragend', () => {
       this.draggedTask = null;
       if (this.draggedElement) {
-        this.draggedElement.classList.remove('board-card-dragging');
+        this.draggedElement.classList.remove('dragging');
         this.draggedElement = null;
       }
       // Remove all drag-over classes
-      this.contentEl.querySelectorAll('.board-column-body').forEach(el => {
-        el.classList.remove('board-column-drag-over');
+      this.contentEl.querySelectorAll('.board-column-tasks').forEach(el => {
+        el.classList.remove('drag-over');
       });
     });
   }
 
   private setupDropZone(dropZone: HTMLElement, status: Status): void {
-    dropZone.addEventListener('dragover', (e) => {
+    const dragOverHandler = (e: DragEvent) => {
       e.preventDefault();
-      dropZone.classList.add('board-column-drag-over');
-    });
+      dropZone.classList.add('drag-over');
+    };
 
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('board-column-drag-over');
-    });
+    const dragLeaveHandler = () => {
+      dropZone.classList.remove('drag-over');
+    };
 
-    dropZone.addEventListener('drop', async (e) => {
+    const dropHandler = async (e: DragEvent) => {
       e.preventDefault();
-      dropZone.classList.remove('board-column-drag-over');
+      dropZone.classList.remove('drag-over');
 
       if (this.draggedTask && this.draggedTask.status !== status) {
         hapticFeedback('medium');
         await this.moveTaskToStatus(this.draggedTask, status);
       }
+    };
+
+    dropZone.addEventListener('dragover', dragOverHandler);
+    dropZone.addEventListener('dragleave', dragLeaveHandler);
+    dropZone.addEventListener('drop', dropHandler);
+
+    // Store cleanup functions
+    this.cleanupFunctions.push(() => {
+      dropZone.removeEventListener('dragover', dragOverHandler);
+      dropZone.removeEventListener('dragleave', dragLeaveHandler);
+      dropZone.removeEventListener('drop', dropHandler);
     });
 
     // Touch events for mobile drag-drop
@@ -238,11 +266,18 @@ export class BoardView extends ItemView {
   private setupTouchDragDrop(dropZone: HTMLElement, status: Status): void {
     // Simplified touch drag-drop handling
     // Full implementation would track touch movements and provide visual feedback
-    dropZone.addEventListener('touchend', async () => {
+    const touchEndHandler = async () => {
       if (this.draggedTask && this.draggedTask.status !== status) {
         hapticFeedback('medium');
         await this.moveTaskToStatus(this.draggedTask, status);
       }
+    };
+
+    dropZone.addEventListener('touchend', touchEndHandler);
+
+    // Store cleanup
+    this.cleanupFunctions.push(() => {
+      dropZone.removeEventListener('touchend', touchEndHandler);
     });
   }
 
