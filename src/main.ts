@@ -2,6 +2,9 @@ import { Plugin, Modal, Setting } from 'obsidian';
 import { TimelineViewerSettings, DEFAULT_SETTINGS, TimelineViewerSettingTab } from './settings';
 import { TimelineView, TIMELINE_VIEW_TYPE } from './views/TimelineView';
 import { WBSView, WBS_VIEW_TYPE } from './views/WBSView';
+import { BoardView, BOARD_VIEW_TYPE } from './views/BoardView';
+import { ListView, LIST_VIEW_TYPE } from './views/ListView';
+import { MyTasksView, MY_TASKS_VIEW_TYPE } from './views/MyTasksView';
 import { DataService } from './services/DataService';
 import type { EntityType } from './models/types';
 
@@ -27,6 +30,21 @@ export default class TimelineViewerPlugin extends Plugin {
       (leaf) => new WBSView(leaf, this)
     );
 
+    this.registerView(
+      BOARD_VIEW_TYPE,
+      (leaf) => new BoardView(leaf, this)
+    );
+
+    this.registerView(
+      LIST_VIEW_TYPE,
+      (leaf) => new ListView(leaf, this)
+    );
+
+    this.registerView(
+      MY_TASKS_VIEW_TYPE,
+      (leaf) => new MyTasksView(leaf, this)
+    );
+
     // Add ribbon icons
     this.addRibbonIcon('gantt-chart', 'Open Timeline View', () => {
       this.activateView(TIMELINE_VIEW_TYPE);
@@ -34,6 +52,18 @@ export default class TimelineViewerPlugin extends Plugin {
 
     this.addRibbonIcon('list-tree', 'Open WBS View', () => {
       this.activateView(WBS_VIEW_TYPE);
+    });
+
+    this.addRibbonIcon('layout-dashboard', 'Open Board View', () => {
+      this.activateView(BOARD_VIEW_TYPE);
+    });
+
+    this.addRibbonIcon('list', 'Open List View', () => {
+      this.activateView(LIST_VIEW_TYPE);
+    });
+
+    this.addRibbonIcon('check-square', 'Open My Tasks', () => {
+      this.activateView(MY_TASKS_VIEW_TYPE);
     });
 
     // Add commands
@@ -47,6 +77,24 @@ export default class TimelineViewerPlugin extends Plugin {
       id: 'open-wbs-view',
       name: 'Open WBS View',
       callback: () => this.activateView(WBS_VIEW_TYPE),
+    });
+
+    this.addCommand({
+      id: 'open-board-view',
+      name: 'Open Board View',
+      callback: () => this.activateView(BOARD_VIEW_TYPE),
+    });
+
+    this.addCommand({
+      id: 'open-list-view',
+      name: 'Open List View',
+      callback: () => this.activateView(LIST_VIEW_TYPE),
+    });
+
+    this.addCommand({
+      id: 'open-my-tasks',
+      name: 'Open My Tasks',
+      callback: () => this.activateView(MY_TASKS_VIEW_TYPE),
     });
 
     this.addCommand({
@@ -109,6 +157,9 @@ export default class TimelineViewerPlugin extends Plugin {
     // Clean up views
     this.app.workspace.detachLeavesOfType(TIMELINE_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(WBS_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(BOARD_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(LIST_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(MY_TASKS_VIEW_TYPE);
   }
 
   async loadSettings(): Promise<void> {
@@ -150,6 +201,27 @@ export default class TimelineViewerPlugin extends Plugin {
     const wbsLeaves = this.app.workspace.getLeavesOfType(WBS_VIEW_TYPE);
     wbsLeaves.forEach(leaf => {
       const view = leaf.view as WBSView;
+      view.render();
+    });
+
+    // Refresh Board view
+    const boardLeaves = this.app.workspace.getLeavesOfType(BOARD_VIEW_TYPE);
+    boardLeaves.forEach(leaf => {
+      const view = leaf.view as BoardView;
+      view.render();
+    });
+
+    // Refresh List view
+    const listLeaves = this.app.workspace.getLeavesOfType(LIST_VIEW_TYPE);
+    listLeaves.forEach(leaf => {
+      const view = leaf.view as ListView;
+      view.render();
+    });
+
+    // Refresh My Tasks view
+    const myTasksLeaves = this.app.workspace.getLeavesOfType(MY_TASKS_VIEW_TYPE);
+    myTasksLeaves.forEach(leaf => {
+      const view = leaf.view as MyTasksView;
       view.render();
     });
   }

@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import type TimelineViewerPlugin from '../main';
-import type { TimelineItem } from '../models/types';
+import type { TimelineItem, Dependency } from '../models/types';
 import {
   isMobile,
   createSwipeHandler,
@@ -14,13 +14,23 @@ export const TIMELINE_VIEW_TYPE = 'timeline-viewer-timeline';
 
 type TimelineScale = 'day' | 'week' | 'month';
 
+interface BarPosition {
+  id: string;
+  row: number;
+  startCol: number;
+  endCol: number;
+  element: HTMLElement | null;
+}
+
 export class TimelineView extends ItemView {
   plugin: TimelineViewerPlugin;
   private contentEl: HTMLElement;
   private timelineContainer: HTMLElement | null = null;
+  private dependencySvg: SVGSVGElement | null = null;
   private currentScale: TimelineScale = 'week';
   private currentOffset: number = 0; // Navigation offset
   private cleanupFunctions: (() => void)[] = [];
+  private barPositions: Map<string, BarPosition> = new Map();
 
   constructor(leaf: WorkspaceLeaf, plugin: TimelineViewerPlugin) {
     super(leaf);
@@ -262,6 +272,7 @@ export class TimelineView extends ItemView {
     if (!this.timelineContainer) return;
 
     this.timelineContainer.empty();
+    this.barPositions.clear();
 
     // Update scale select if exists
     const scaleSelect = this.contentEl.querySelector('.timeline-scale-select') as HTMLSelectElement;
@@ -277,8 +288,12 @@ export class TimelineView extends ItemView {
       return;
     }
 
+    // Create wrapper for grid and SVG overlay
+    const wrapper = this.timelineContainer.createDiv({ cls: 'timeline-wrapper' });
+    wrapper.style.position = 'relative';
+
     // Create timeline grid
-    const grid = this.timelineContainer.createDiv({ cls: 'timeline-grid' });
+    const grid = wrapper.createDiv({ cls: 'timeline-grid' });
 
     // Determine number of columns based on device
     const columnCount = isMobile() ? 7 : 12;
@@ -287,9 +302,33 @@ export class TimelineView extends ItemView {
     this.renderTimelineHeader(grid, columnCount);
 
     // Render items
+    let rowIndex = 0;
     items.forEach(item => {
-      this.renderTimelineItem(grid, item, columnCount);
+      this.renderTimelineItem(grid, item, columnCount, rowIndex);
+      rowIndex++;
     });
+
+    // Create SVG layer for dependencies
+    if (this.plugin.settings.showDependencies) {
+      this.dependencySvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this.dependencySvg.classList.add('timeline-dependencies-svg');
+      this.dependencySvg.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 10;
+      `;
+      wrapper.appendChild(this.dependencySvg);
+
+      // Render dependencies after a small delay to ensure layout is complete
+      requestAnimationFrame(() => {
+        this.renderDependencies(items);
+      });
+    }
   }
 
   private renderEmptyState(container: HTMLElement): void {
@@ -328,12 +367,23 @@ export class TimelineView extends ItemView {
     grid.style.gridTemplateColumns = `${isMobile() ? '120px' : '150px'} repeat(${columnCount}, minmax(${isMobile() ? '50px' : '60px'}, 1fr))`;
   }
 
-  private renderTimelineItem(grid: HTMLElement, item: TimelineItem, columnCount: number): void {
+  private renderTimelineItem(grid: HTMLElement, item: TimelineItem, columnCount: number, rowIndex: number): void {
     const row = grid.createDiv({ cls: `timeline-row timeline-row-${item.type}` });
+    row.dataset.itemId = item.id;
 
     // Label with touch feedback
     const label = row.createDiv({ cls: 'timeline-label-cell' });
     const titleSpan = label.createSpan({ text: item.title, cls: 'timeline-item-title' });
+
+    // Add blocked/blocker indicators
+    if (item.isBlocked && this.plugin.settings.highlightBlockers) {
+      titleSpan.addClass('timeline-item-blocked');
+      titleSpan.setAttribute('title', 'Blocked by incomplete dependencies');
+    }
+    if (item.isBlocker && this.plugin.settings.highlightBlockers) {
+      titleSpan.addClass('timeline-item-blocker');
+      titleSpan.setAttribute('title', 'Blocking other tasks');
+    }
 
     // Long press to open, tap for details
     const longPressCleanup = createLongPressHandler(titleSpan, () => {
@@ -361,6 +411,15 @@ export class TimelineView extends ItemView {
       });
       bar.style.gridColumnStart = String(startCol + 1);
       bar.style.gridColumnEnd = String(endCol + 2);
+      bar.dataset.itemId = item.id;
+
+      // Add blocked/blocker styling
+      if (item.isBlocked && this.plugin.settings.highlightBlockers) {
+        bar.addClass('timeline-bar-blocked');
+      }
+      if (item.isBlocker && this.plugin.settings.highlightBlockers) {
+        bar.addClass('timeline-bar-blocker');
+      }
 
       // Progress indicator
       const progress = bar.createDiv({ cls: 'timeline-bar-progress' });
@@ -371,7 +430,146 @@ export class TimelineView extends ItemView {
         hapticFeedback('light');
         this.plugin.openEntity(item.id);
       });
+
+      // Store bar position for dependency rendering
+      this.barPositions.set(item.id, {
+        id: item.id,
+        row: rowIndex,
+        startCol,
+        endCol,
+        element: bar
+      });
     }
+  }
+
+  /**
+   * Render dependency arrows between tasks
+   */
+  private renderDependencies(items: TimelineItem[]): void {
+    if (!this.dependencySvg || !this.timelineContainer) return;
+
+    // Clear existing paths
+    this.dependencySvg.innerHTML = '';
+
+    // Add arrowhead marker
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    marker.setAttribute('id', 'dependency-arrow');
+    marker.setAttribute('markerWidth', '10');
+    marker.setAttribute('markerHeight', '10');
+    marker.setAttribute('refX', '9');
+    marker.setAttribute('refY', '3');
+    marker.setAttribute('orient', 'auto');
+    marker.setAttribute('markerUnits', 'strokeWidth');
+
+    const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrowPath.setAttribute('d', 'M0,0 L0,6 L9,3 z');
+    arrowPath.setAttribute('fill', this.plugin.settings.dependencyLineColor);
+    marker.appendChild(arrowPath);
+    defs.appendChild(marker);
+    this.dependencySvg.appendChild(defs);
+
+    // Draw dependency lines for each item
+    items.forEach(item => {
+      if (!item.dependencies || item.dependencies.length === 0) return;
+
+      const targetPos = this.barPositions.get(item.id);
+      if (!targetPos || !targetPos.element) return;
+
+      item.dependencies.forEach((dep: Dependency) => {
+        const sourcePos = this.barPositions.get(dep.taskId);
+        if (!sourcePos || !sourcePos.element) return;
+
+        this.drawDependencyLine(sourcePos, targetPos, dep.type);
+      });
+    });
+  }
+
+  /**
+   * Draw a dependency line between two bars
+   */
+  private drawDependencyLine(
+    source: BarPosition,
+    target: BarPosition,
+    depType: string
+  ): void {
+    if (!this.dependencySvg || !source.element || !target.element) return;
+
+    const wrapper = this.timelineContainer?.querySelector('.timeline-wrapper');
+    if (!wrapper) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const sourceRect = source.element.getBoundingClientRect();
+    const targetRect = target.element.getBoundingClientRect();
+
+    // Calculate connection points based on dependency type
+    let startX: number, startY: number, endX: number, endY: number;
+
+    switch (depType) {
+      case 'finish-to-start':
+      default:
+        // Line from end of source to start of target
+        startX = sourceRect.right - wrapperRect.left;
+        startY = sourceRect.top + sourceRect.height / 2 - wrapperRect.top;
+        endX = targetRect.left - wrapperRect.left;
+        endY = targetRect.top + targetRect.height / 2 - wrapperRect.top;
+        break;
+      case 'start-to-start':
+        // Line from start of source to start of target
+        startX = sourceRect.left - wrapperRect.left;
+        startY = sourceRect.top + sourceRect.height / 2 - wrapperRect.top;
+        endX = targetRect.left - wrapperRect.left;
+        endY = targetRect.top + targetRect.height / 2 - wrapperRect.top;
+        break;
+      case 'finish-to-finish':
+        // Line from end of source to end of target
+        startX = sourceRect.right - wrapperRect.left;
+        startY = sourceRect.top + sourceRect.height / 2 - wrapperRect.top;
+        endX = targetRect.right - wrapperRect.left;
+        endY = targetRect.top + targetRect.height / 2 - wrapperRect.top;
+        break;
+      case 'start-to-finish':
+        // Line from start of source to end of target
+        startX = sourceRect.left - wrapperRect.left;
+        startY = sourceRect.top + sourceRect.height / 2 - wrapperRect.top;
+        endX = targetRect.right - wrapperRect.left;
+        endY = targetRect.top + targetRect.height / 2 - wrapperRect.top;
+        break;
+    }
+
+    // Create path with curved line
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+    // Calculate control points for bezier curve
+    const midX = (startX + endX) / 2;
+    const controlOffset = Math.min(Math.abs(endY - startY) / 2, 30);
+
+    let d: string;
+    if (startY === endY) {
+      // Straight horizontal line
+      d = `M ${startX} ${startY} L ${endX} ${endY}`;
+    } else if (endX > startX) {
+      // Target is to the right - simple curve
+      d = `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+    } else {
+      // Target is to the left - route around
+      const offset = 20;
+      d = `M ${startX} ${startY}
+           L ${startX + offset} ${startY}
+           Q ${startX + offset + controlOffset} ${startY}, ${startX + offset + controlOffset} ${startY + (endY > startY ? controlOffset : -controlOffset)}
+           L ${startX + offset + controlOffset} ${endY + (endY > startY ? -controlOffset : controlOffset)}
+           Q ${startX + offset + controlOffset} ${endY}, ${startX + offset} ${endY}
+           L ${endX} ${endY}`;
+    }
+
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', this.plugin.settings.dependencyLineColor);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('marker-end', 'url(#dependency-arrow)');
+    path.classList.add('timeline-dependency-line');
+
+    this.dependencySvg.appendChild(path);
   }
 
   private getTimePeriods(count: number): { start: Date; end: Date; label: string; isCurrent: boolean }[] {
