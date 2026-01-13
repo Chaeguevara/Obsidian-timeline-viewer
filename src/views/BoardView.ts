@@ -1,3 +1,32 @@
+/**
+ * @fileoverview BoardView - Kanban-style board for task management
+ *
+ * Provides a visual board with columns for different task statuses.
+ * Supports drag-and-drop to change task status, mobile gestures,
+ * and quick task creation.
+ *
+ * **Features Implemented:**
+ * - ✅ Kanban columns by status (To Do, In Progress, On Hold, Done)
+ * - ✅ Drag-and-drop to change status (desktop)
+ * - ✅ Touch drag-and-drop (mobile)
+ * - ✅ Task cards with metadata (due date, assignee, project, progress, tags)
+ * - ✅ Long-press context menu (mobile)
+ * - ✅ Quick add button per column
+ * - ✅ Overdue highlighting
+ * - ✅ Floating action button (mobile)
+ *
+ * **TODO - Missing Features:**
+ * - [ ] Inline task editing (click title to edit)
+ * - [ ] Batch operations (multi-select tasks)
+ * - [ ] Custom swim lanes (group by project, assignee, etc.)
+ * - [ ] Column filtering and search
+ * - [ ] Task sorting within columns (by due date, priority, etc.)
+ * - [ ] Column collapse/expand
+ * - [ ] Task card customization (show/hide fields)
+ *
+ * @module BoardView
+ */
+
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import type TimelineViewerPlugin from '../main';
 import type { Task, Status, BoardColumn } from '../models/types';
@@ -9,6 +38,10 @@ import {
 
 export const BOARD_VIEW_TYPE = 'timeline-viewer-board';
 
+/**
+ * Column definitions for the Kanban board
+ * Maps task statuses to visual columns with titles and colors
+ */
 const STATUS_COLUMNS: { status: Status; title: string; color: string }[] = [
   { status: 'not-started', title: 'To Do', color: 'var(--text-muted)' },
   { status: 'in-progress', title: 'In Progress', color: 'var(--interactive-accent)' },
@@ -16,11 +49,35 @@ const STATUS_COLUMNS: { status: Status; title: string; color: string }[] = [
   { status: 'completed', title: 'Done', color: 'var(--color-green)' }
 ];
 
+/**
+ * BoardView - Kanban board for visual task management
+ *
+ * Displays tasks in columns based on their status.
+ * Allows drag-and-drop status changes and provides
+ * mobile-optimized interactions.
+ *
+ * **Usage:**
+ * - Drag task cards between columns to update status
+ * - Click task title to open in editor
+ * - Long-press (mobile) or right-click (future) for context menu
+ * - Use "+" button to create tasks in specific columns
+ *
+ * @extends ItemView
+ */
 export class BoardView extends ItemView {
+  /** Reference to the main plugin instance */
   plugin: TimelineViewerPlugin;
+
+  /** Main content container element */
   private contentEl: HTMLElement;
+
+  /** Currently dragged task (during drag operation) */
   private draggedTask: Task | null = null;
+
+  /** DOM element being dragged */
   private draggedElement: HTMLElement | null = null;
+
+  /** Cleanup functions for event listeners (prevents memory leaks) */
   private cleanupFunctions: (() => void)[] = [];
 
   constructor(leaf: WorkspaceLeaf, plugin: TimelineViewerPlugin) {
@@ -54,12 +111,37 @@ export class BoardView extends ItemView {
     this.contentEl.empty();
   }
 
+  /**
+   * Render the Kanban board
+   *
+   * Creates the board layout with columns for each status.
+   * Each column displays tasks grouped by their status.
+   *
+   * **Layout:**
+   * ```
+   * +--------------------------------------------------+
+   * | Board View                           [+ Task]   |
+   * +--------------------------------------------------+
+   * | To Do | In Progress | On Hold | Done           |
+   * |  (3)  |     (5)     |   (1)   |  (12)          |
+   * |-------|-------------|---------|----------------|
+   * | Card  | Card        | Card    | Card           |
+   * | Card  | Card        |         | Card           |
+   * | Card  | Card        |         | ...            |
+   * |       | Card        |         |                |
+   * |       | Card        |         |                |
+   * +--------------------------------------------------+
+   * ```
+   *
+   * @returns Promise that resolves when rendering is complete
+   */
   async render(): Promise<void> {
+    // Clean up previous event listeners
     this.cleanupFunctions.forEach(cleanup => cleanup());
     this.cleanupFunctions = [];
     this.contentEl.empty();
 
-    // Header
+    // Header with title and controls
     const header = this.contentEl.createDiv({ cls: 'board-header' });
     header.createEl('h2', { text: 'Board View' });
 
@@ -286,9 +368,21 @@ export class BoardView extends ItemView {
     this.plugin.refreshViews();
   }
 
+  /**
+   * Quick-add a task directly in a column
+   *
+   * **TODO - Implement Inline Task Creation:**
+   * Currently opens the full creation modal. Should implement inline editing:
+   * 1. Show input field at top of column
+   * 2. User types task title and presses Enter
+   * 3. Create task with default values and specified status
+   * 4. Add task card to column without full page refresh
+   *
+   * @param status - Status to assign to the new task
+   */
   private quickAddTask(status: Status): void {
+    // TODO: Replace with inline input field
     // For now, open the regular create modal
-    // Future: inline input field
     this.plugin.createNewEntity('task');
   }
 

@@ -1,3 +1,39 @@
+/**
+ * @fileoverview DataService - Core data management for Timeline Viewer
+ *
+ * This service is the single source of truth for all entity data in the plugin.
+ * It provides:
+ * - Entity CRUD operations (Create, Read, Update, Delete)
+ * - In-memory caching for performance
+ * - Specialized query methods for views
+ * - Folder structure management (nested vs. flat)
+ * - Automatic ID generation
+ * - Frontmatter parsing and serialization
+ *
+ * **Architecture:**
+ * ```
+ * DataService
+ *   ├── Cache (Map<string, Entity>) - In-memory entity storage
+ *   ├── CRUD Operations - Create, update, delete entities
+ *   ├── Queries - Specialized methods for views
+ *   └── File Management - Folder structure, file creation
+ * ```
+ *
+ * **Usage Example:**
+ * ```typescript
+ * // In a view:
+ * const tasks = this.plugin.dataService.getEntitiesByType<Task>('task');
+ * const timelineItems = this.plugin.dataService.getTimelineItems();
+ *
+ * // Create new entity:
+ * await this.plugin.dataService.createEntity('task', 'Fix bug', 'project-123');
+ * ```
+ *
+ * @module DataService
+ * @see {@link TimelineViewerSettings} for configuration
+ * @see {@link Entity} for type definitions
+ */
+
 import { App, TFile, TFolder, normalizePath } from 'obsidian';
 import type { TimelineViewerSettings } from '../settings';
 import type {
@@ -17,22 +53,89 @@ import type {
 } from '../models/types';
 import { Logger } from '../utils/Logger';
 
+/**
+ * DataService - Central data management service
+ *
+ * Manages all entity data for the Timeline Viewer plugin.
+ * Provides CRUD operations, caching, and specialized queries for views.
+ *
+ * **Key Responsibilities:**
+ * 1. **Caching:** Maintains in-memory cache of all entities for performance
+ * 2. **CRUD:** Create, read, update, delete operations on entities
+ * 3. **Queries:** Specialized query methods for different views
+ * 4. **File Management:** Handles folder structure and file creation
+ * 5. **Parsing:** Converts markdown files with frontmatter to Entity objects
+ *
+ * **Cache Management:**
+ * - Cache is refreshed on initialization
+ * - Cache is refreshed on vault file changes (create, modify, delete)
+ * - Cache uses entity IDs as keys for O(1) lookups
+ *
+ * **Folder Structures:**
+ * - Nested: Root/Goals/Goal1/Portfolios/Portfolio1/Projects/Project1/Tasks/
+ * - Flat: Root/Goals/, Root/Portfolios/, Root/Projects/, Root/Tasks/
+ *
+ * @class DataService
+ */
 export class DataService {
+  /** Obsidian app instance for vault access */
   private app: App;
+
+  /** Plugin settings (folder structure, preferences) */
   private settings: TimelineViewerSettings;
+
+  /**
+   * In-memory cache of all entities
+   * Key: Entity ID, Value: Entity object
+   * Updated on: initialize(), refreshCache(), createEntity(), updateEntity(), deleteEntity()
+   */
   private cache: Map<string, Entity> = new Map();
 
+  /**
+   * Construct a new DataService
+   *
+   * @param app - Obsidian app instance
+   * @param settings - Plugin settings
+   */
   constructor(app: App, settings: TimelineViewerSettings) {
     this.app = app;
     this.settings = settings;
   }
 
+  /**
+   * Update settings reference
+   *
+   * Called when user changes settings in the settings tab.
+   * Allows DataService to use updated folder paths without recreating the instance.
+   *
+   * **Note:** Does NOT trigger cache refresh automatically.
+   * Views should call refreshCache() if folder structure changed.
+   *
+   * @param settings - Updated settings
+   */
   updateSettings(settings: TimelineViewerSettings): void {
     this.settings = settings;
   }
 
   /**
-   * Initialize and build cache from vault files
+   * Initialize DataService and build entity cache
+   *
+   * Scans the vault for all entity markdown files and populates the cache.
+   * Called twice during plugin initialization:
+   * 1. Immediately after plugin load (may be incomplete if metadata not ready)
+   * 2. After workspace.onLayoutReady() (full metadata cache available)
+   *
+   * **Process:**
+   * 1. Clears existing cache
+   * 2. Scans folders based on settings (nested vs. flat structure)
+   * 3. Parses frontmatter from each markdown file
+   * 4. Stores entities in cache with auto-generated IDs if needed
+   *
+   * @returns Promise that resolves when initialization is complete
+   *
+   * @example
+   * await dataService.initialize();
+   * console.log(`Loaded ${dataService.cache.size} entities`);
    */
   async initialize(): Promise<void> {
     Logger.info('DataService.initialize() - START');
@@ -41,7 +144,28 @@ export class DataService {
   }
 
   /**
-   * Refresh the entity cache by scanning vault files
+   * Refresh the entity cache by rescanning all vault files
+   *
+   * Clears the current cache and rebuilds it from scratch.
+   * Called automatically by:
+   * - File modification events
+   * - File creation events
+   * - File deletion events
+   * - Manual refresh command
+   *
+   * **Performance Note:** For large vaults (1000+ files), this may take a few seconds.
+   * Consider debouncing if calling frequently.
+   *
+   * **Folder Scanning Strategy:**
+   * - **Nested Structure:** Recursively scans from rootFolder
+   * - **Flat Structure:** Scans specific folders (goals/, portfolios/, projects/, tasks/)
+   *
+   * @returns Promise that resolves when cache is refreshed
+   *
+   * @example
+   * // Refresh after manual file changes
+   * await dataService.refreshCache();
+   * await viewInstance.render(); // Re-render view with new data
    */
   async refreshCache(): Promise<void> {
     Logger.info('DataService.refreshCache() - START');
@@ -299,6 +423,26 @@ export class DataService {
 
   /**
    * Get all entities of a specific type
+   *
+   * Generic method that returns a typed array of entities filtered by type.
+   * Uses TypeScript generics for type safety and autocomplete.
+   *
+   * **Performance:** O(n) where n = cache.size (filters entire cache)
+   *
+   * @template T - Entity type (Goal, Portfolio, Project, Task)
+   * @param type - Entity type to filter by
+   * @returns Typed array of entities matching the type
+   *
+   * @example
+   * // Get all tasks with full type safety
+   * const tasks = dataService.getEntitiesByType<Task>('task');
+   * tasks.forEach(task => {
+   *   console.log(task.priority); // TypeScript knows this is Priority
+   * });
+   *
+   * @example
+   * // Get all projects
+   * const projects = dataService.getEntitiesByType<Project>('project');
    */
   getEntitiesByType<T extends Entity>(type: EntityType): T[] {
     return Array.from(this.cache.values()).filter(
@@ -308,13 +452,55 @@ export class DataService {
 
   /**
    * Get entity by ID
+   *
+   * Direct O(1) lookup in the cache.
+   *
+   * @param id - Entity ID to lookup
+   * @returns Entity if found, undefined otherwise
+   *
+   * @example
+   * const entity = dataService.getEntity('task-abc123');
+   * if (entity) {
+   *   console.log(entity.title);
+   * }
    */
   getEntity(id: string): Entity | undefined {
     return this.cache.get(id);
   }
 
   /**
-   * Get timeline items for visualization
+   * Get timeline items for Gantt chart visualization
+   *
+   * Transforms entity data into a structure optimized for timeline rendering.
+   * Includes:
+   * - Projects with date ranges
+   * - Tasks grouped under their projects
+   * - Standalone tasks (tasks without a project parent)
+   *
+   * **Filtering:**
+   * - Only includes entities with valid start/end dates
+   * - Skips projects/tasks missing date information
+   *
+   * **Hierarchy:**
+   * ```
+   * Project A (with color)
+   *   ├─ Task 1 (inherits project color)
+   *   └─ Task 2 (inherits project color)
+   * Project B
+   *   └─ Task 3
+   * Standalone Task X
+   * ```
+   *
+   * @returns Array of timeline items ready for Gantt rendering
+   *
+   * @example
+   * const items = dataService.getTimelineItems();
+   * items.forEach(item => {
+   *   console.log(`${item.title}: ${item.startDate} to ${item.endDate}`);
+   *   if (item.children) {
+   *     console.log(`  Has ${item.children.length} child tasks`);
+   *   }
+   * });
    */
   getTimelineItems(): TimelineItem[] {
     Logger.info('getTimelineItems() - START');
@@ -390,7 +576,41 @@ export class DataService {
   }
 
   /**
-   * Get WBS tree structure
+   * Get WBS (Work Breakdown Structure) tree for hierarchical view
+   *
+   * Builds a nested tree structure representing the entity hierarchy:
+   * Goal → Portfolio → Project → Task
+   *
+   * **Features:**
+   * - Automatically aggregates progress from children
+   * - Includes expand/collapse state
+   * - Preserves parent-child relationships
+   *
+   * **Hierarchy Example:**
+   * ```
+   * Goal: "Increase Revenue" (75% complete)
+   *   ├─ Portfolio: "Product Launch" (80% complete)
+   *   │   ├─ Project: "Marketing Campaign" (100% complete)
+   *   │   │   ├─ Task: "Design assets" (completed)
+   *   │   │   └─ Task: "Run ads" (completed)
+   *   │   └─ Project: "Website" (60% complete)
+   *   │       └─ Task: "Build landing page" (in-progress)
+   *   └─ Portfolio: "Sales Training" (70% complete)
+   *       └─ ...
+   * ```
+   *
+   * **Progress Calculation:**
+   * - Leaf nodes (tasks): Use their own progress value
+   * - Parent nodes: Average of children's progress (recursive)
+   *
+   * @returns Array of root nodes (Goals) with nested children
+   *
+   * @example
+   * const tree = dataService.getWBSTree();
+   * tree.forEach(goalNode => {
+   *   console.log(`${goalNode.title}: ${goalNode.progress}%`);
+   *   renderNode(goalNode, 0); // Render recursively
+   * });
    */
   getWBSTree(): WBSNode[] {
     const goals = this.getEntitiesByType<Goal>('goal');
@@ -445,7 +665,52 @@ export class DataService {
   }
 
   /**
-   * Create a new entity file
+   * Create a new entity as a markdown file with frontmatter
+   *
+   * **Process:**
+   * 1. Determine target folder based on type and parent
+   * 2. Ensure folder exists (creates if needed)
+   * 3. Generate unique ID and timestamps
+   * 4. Build frontmatter with defaults
+   * 5. Create markdown file
+   * 6. For projects: Auto-create 3 sample tasks
+   * 7. Refresh cache and return entity
+   *
+   * **Defaults by Type:**
+   * - **Goal:** status = 'not-started'
+   * - **Portfolio:** status = 'not-started'
+   * - **Project:** status = 'in-progress', progress = 0, dates = today + 26 days
+   * - **Task:** priority = 'medium', progress = 0, duration = 1 hour from now
+   *
+   * **Sample Tasks for Projects:**
+   * When creating a project, 3 sample tasks are automatically created:
+   * 1. "Research and Planning" (4 days, not-started)
+   * 2. "Implementation" (14 days, in-progress)
+   * 3. "Testing and Review" (8 days, not-started)
+   *
+   * **Folder Structure:**
+   * - Nested: Parent's folder + TypeFolder + title/
+   * - Flat: Settings-defined folder for each type
+   *
+   * @param type - Entity type to create
+   * @param title - Entity title (will be sanitized for filename)
+   * @param parentId - Optional parent entity ID (for creating child entities)
+   * @returns The created entity, or null if creation failed
+   * @throws Error if folder creation or file writing fails
+   *
+   * @example
+   * // Create a standalone goal
+   * const goal = await dataService.createEntity('goal', 'Increase Revenue');
+   *
+   * @example
+   * // Create a project under a portfolio
+   * const portfolio = dataService.getEntity('portfolio-123');
+   * const project = await dataService.createEntity('project', 'Marketing Campaign', portfolio.id);
+   *
+   * @example
+   * // Create a task under a project
+   * const project = dataService.getEntity('project-456');
+   * const task = await dataService.createEntity('task', 'Design assets', project.id);
    */
   async createEntity(type: EntityType, title: string, parentId?: string): Promise<Entity | null> {
     Logger.info(`createEntity() - START (type: ${type}, title: "${title}", parentId: ${parentId || 'none'})`);

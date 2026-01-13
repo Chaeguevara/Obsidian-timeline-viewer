@@ -1,3 +1,35 @@
+/**
+ * @fileoverview ListView - Table/spreadsheet view for task management
+ *
+ * Provides a sortable, filterable table view of all tasks.
+ * Designed for users who prefer a data-oriented view.
+ *
+ * **Features Implemented:**
+ * - ✅ Table layout with columns (checkbox, title, project, assignee, due date, priority, status)
+ * - ✅ Basic filtering (all, active, completed, overdue)
+ * - ✅ Row selection (checkbox)
+ * - ✅ Click to open task
+ * - ✅ Mobile-responsive layout
+ *
+ * **TODO - Missing Features:**
+ * - [ ] Column sorting (click header to sort)
+ * - [ ] Advanced filtering (by project, assignee, priority, tags)
+ * - [ ] Multi-select and batch operations (bulk status change, delete, etc.)
+ * - [ ] Inline editing (double-click cell to edit)
+ * - [ ] Column customization (show/hide columns, reorder)
+ * - [ ] Export to CSV
+ * - [ ] Search functionality
+ * - [ ] Keyboard navigation (arrow keys, Enter to edit)
+ * - [ ] Virtualization for large datasets (100+ tasks)
+ *
+ * **Implementation Guide:**
+ * 1. Column sorting: Add click handlers to headers, update sortOptions state, re-render
+ * 2. Batch operations: Add toolbar when tasks selected, implement bulk actions
+ * 3. Inline editing: Use contenteditable or input elements, save on blur/Enter
+ *
+ * @module ListView
+ */
+
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import type TimelineViewerPlugin from '../main';
 import type { Task, Status, Priority, SortOptions } from '../models/types';
