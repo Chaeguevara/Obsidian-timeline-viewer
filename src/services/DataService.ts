@@ -11,6 +11,8 @@ import type {
   WBSNode,
   Status,
   Priority,
+  Dependency,
+  DependencyType,
   EntityFrontmatter
 } from '../models/types';
 import { Logger } from '../utils/Logger';
@@ -180,6 +182,7 @@ export class DataService {
           startDate: this.parseDate(frontmatter.startDate),
           endDate: this.parseDate(frontmatter.endDate),
           progress: frontmatter.progress || 0,
+          color: frontmatter.color,  // Parse color from frontmatter
         } as Project;
 
       case 'task':
@@ -192,7 +195,8 @@ export class DataService {
           priority: (frontmatter.priority || 'medium') as Priority,
           assignee: frontmatter.assignee,
           collaborators: frontmatter.collaborators || [],
-          dependencies: frontmatter.dependencies || [],
+          dependencies: this.parseDependencies(frontmatter.precedents || frontmatter.dependencies || []),
+          dependents: this.parseDependencyIds(frontmatter.descendants || []),
           progress: frontmatter.progress || 0,
           estimatedHours: frontmatter.estimatedHours,
           actualHours: frontmatter.actualHours,
@@ -251,6 +255,49 @@ export class DataService {
   }
 
   /**
+   * Parse dependencies from frontmatter (precedents field)
+   * Supports: string[], [[link]] format, or plain IDs
+   */
+  private parseDependencies(deps: unknown): Dependency[] {
+    if (!deps) return [];
+    if (!Array.isArray(deps)) return [];
+
+    return deps.map(dep => {
+      // Handle string links like "[[Task A]]"
+      if (typeof dep === 'string') {
+        const id = this.extractLinkId(dep) || dep;
+        return { taskId: id, type: 'finish-to-start' as DependencyType };
+      }
+      // Handle object format { task: "[[link]]", type: "...", lag: N }
+      if (typeof dep === 'object' && dep !== null) {
+        const depObj = dep as { task?: string; type?: string; lag?: number };
+        return {
+          taskId: this.extractLinkId(depObj.task) || depObj.task || '',
+          type: (depObj.type || 'finish-to-start') as DependencyType,
+          lag: depObj.lag,
+        };
+      }
+      return { taskId: String(dep), type: 'finish-to-start' as DependencyType };
+    }).filter(d => d.taskId);
+  }
+
+  /**
+   * Parse descendant IDs from frontmatter (descendants field)
+   * Returns array of task IDs that depend on this task
+   */
+  private parseDependencyIds(deps: unknown): string[] {
+    if (!deps) return [];
+    if (!Array.isArray(deps)) return [];
+
+    return deps.map(dep => {
+      if (typeof dep === 'string') {
+        return this.extractLinkId(dep) || dep;
+      }
+      return String(dep);
+    }).filter(Boolean);
+  }
+
+  /**
    * Get all entities of a specific type
    */
   getEntitiesByType<T extends Entity>(type: EntityType): T[] {
@@ -278,9 +325,9 @@ export class DataService {
     Logger.debug(`getTimelineItems() - Found ${projects.length} projects in cache`);
 
     for (const project of projects) {
-      Logger.debug(`getTimelineItems() - Project "${project.title}": startDate=${project.startDate}, endDate=${project.endDate}`);
+      Logger.debug(`getTimelineItems() - Project "${project.title}": startDate=${project.startDate}, endDate=${project.endDate}, color=${project.color}`);
       if (project.startDate && project.endDate) {
-        const children = this.getProjectTasksAsTimelineItems(project.id);
+        const children = this.getProjectTasksAsTimelineItems(project.id, project.color);
         Logger.debug(`getTimelineItems() - Project "${project.title}" has ${children.length} tasks`);
         items.push({
           id: project.id,
@@ -291,6 +338,7 @@ export class DataService {
           progress: project.progress,
           status: project.status,
           children: children,
+          color: project.color,  // Include project color
         });
       } else {
         Logger.warn(`getTimelineItems() - Project "${project.title}" skipped: missing dates`);
@@ -320,7 +368,7 @@ export class DataService {
     return items.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
   }
 
-  private getProjectTasksAsTimelineItems(projectId: string): TimelineItem[] {
+  private getProjectTasksAsTimelineItems(projectId: string, projectColor?: string): TimelineItem[] {
     const allTasks = this.getEntitiesByType<Task>('task');
     const tasks = allTasks.filter(t => t.projectId === projectId);
     Logger.debug(`getProjectTasksAsTimelineItems() - Project ${projectId}: found ${tasks.length} tasks (total tasks: ${allTasks.length})`);
@@ -336,7 +384,8 @@ export class DataService {
       endDate: task.dueDate!,
       progress: task.progress,
       status: task.status,
-      projectId: projectId,  // Include parent project ID for color mapping
+      projectId: projectId,
+      color: projectColor,  // Propagate project color to tasks
     }));
   }
 

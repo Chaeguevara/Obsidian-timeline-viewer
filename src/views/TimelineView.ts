@@ -168,7 +168,13 @@ export class TimelineView extends ItemView {
   }
 
   private getTaskColor(task: TimelineItem): string {
-    // First try to use projectId from the TimelineItem directly (for child tasks)
+    // First, use the color directly from the TimelineItem (propagated from project)
+    if (task.color) {
+      Logger.debug(`getTaskColor() - Task "${task.title}" using direct color: ${task.color}`);
+      return task.color;
+    }
+
+    // Fallback to generated colors from projectColors map
     if (task.projectId) {
       const color = this.projectColors.get(task.projectId);
       if (color) {
@@ -176,7 +182,8 @@ export class TimelineView extends ItemView {
         return color;
       }
     }
-    // Fallback: lookup from cache
+
+    // Final fallback: lookup from cache
     const taskEntity = this.plugin.dataService.getEntity(task.id) as Task | undefined;
     if (taskEntity?.projectId) {
       const color = this.projectColors.get(taskEntity.projectId);
@@ -185,6 +192,7 @@ export class TimelineView extends ItemView {
         return color;
       }
     }
+
     Logger.debug(`getTaskColor() - Task "${task.title}" using default color`);
     return 'var(--interactive-accent)';
   }
@@ -478,33 +486,38 @@ export class TimelineView extends ItemView {
       return;
     }
 
-    // Calculate date range
+    const { minDate, maxDate, totalDays } = this.calculateGanttDateRange(allTasks);
+    const dayWidth = 20;
+
+    const grid = container.createDiv({ cls: 'gantt-container' });
+    this.renderGanttHeader(grid, minDate, maxDate, totalDays, dayWidth);
+    this.renderGanttBody(grid, allTasks, minDate, totalDays, dayWidth);
+  }
+
+  private calculateGanttDateRange(tasks: TimelineItem[]): { minDate: Date; maxDate: Date; totalDays: number } {
     let minDate = new Date();
     let maxDate = new Date();
     minDate.setMonth(minDate.getMonth() - 1);
     maxDate.setMonth(maxDate.getMonth() + 3);
 
-    allTasks.forEach(task => {
+    tasks.forEach(task => {
       if (task.startDate < minDate) minDate = new Date(task.startDate);
       if (task.endDate > maxDate) maxDate = new Date(task.endDate);
     });
 
-    // Add padding
     minDate.setDate(minDate.getDate() - 7);
     maxDate.setDate(maxDate.getDate() + 7);
 
     const totalDays = Math.ceil((maxDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
-    const dayWidth = 20;
+    return { minDate, maxDate, totalDays };
+  }
 
-    const grid = container.createDiv({ cls: 'gantt-container' });
-
-    // Header with months
+  private renderGanttHeader(grid: HTMLElement, minDate: Date, maxDate: Date, totalDays: number, dayWidth: number): void {
     const header = grid.createDiv({ cls: 'gantt-header' });
-    const taskNamesHeader = header.createDiv({ cls: 'gantt-task-names-header', text: 'Tasks' });
+    header.createDiv({ cls: 'gantt-task-names-header', text: 'Tasks' });
     const timelineHeader = header.createDiv({ cls: 'gantt-timeline-header' });
     timelineHeader.style.width = `${totalDays * dayWidth}px`;
 
-    // Render month headers
     let currentMonth = -1;
     for (let i = 0; i < totalDays; i++) {
       const date = new Date(minDate);
@@ -512,83 +525,95 @@ export class TimelineView extends ItemView {
 
       if (date.getMonth() !== currentMonth) {
         currentMonth = date.getMonth();
+        const monthDays = this.countDaysInMonth(date, maxDate, currentMonth);
         const monthHeader = timelineHeader.createDiv({ cls: 'gantt-month-header' });
         monthHeader.setText(`${MONTH_NAMES[currentMonth]} ${date.getFullYear()}`);
-
-        // Calculate width until next month or end
-        let monthDays = 0;
-        const checkDate = new Date(date);
-        while (checkDate <= maxDate && checkDate.getMonth() === currentMonth) {
-          monthDays++;
-          checkDate.setDate(checkDate.getDate() + 1);
-        }
         monthHeader.style.width = `${monthDays * dayWidth}px`;
       }
     }
+  }
 
-    // Task rows
+  private countDaysInMonth(startDate: Date, maxDate: Date, month: number): number {
+    let days = 0;
+    const checkDate = new Date(startDate);
+    while (checkDate <= maxDate && checkDate.getMonth() === month) {
+      days++;
+      checkDate.setDate(checkDate.getDate() + 1);
+    }
+    return days;
+  }
+
+  private renderGanttBody(grid: HTMLElement, tasks: TimelineItem[], minDate: Date, totalDays: number, dayWidth: number): void {
     const body = grid.createDiv({ cls: 'gantt-body' });
     const taskNames = body.createDiv({ cls: 'gantt-task-names' });
     const timelineBody = body.createDiv({ cls: 'gantt-timeline-body' });
     timelineBody.style.width = `${totalDays * dayWidth}px`;
 
-    // Today line
+    this.renderGanttTodayLine(timelineBody, minDate, totalDays, dayWidth);
+    this.renderGanttGridLines(timelineBody, minDate, totalDays, dayWidth);
+
+    tasks.forEach(task => {
+      this.renderGanttTaskRow(taskNames, timelineBody, task, minDate, dayWidth);
+    });
+  }
+
+  private renderGanttTodayLine(container: HTMLElement, minDate: Date, totalDays: number, dayWidth: number): void {
     const today = new Date();
     const todayOffset = Math.ceil((today.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
     if (todayOffset >= 0 && todayOffset <= totalDays) {
-      const todayLine = timelineBody.createDiv({ cls: 'gantt-today-line' });
+      const todayLine = container.createDiv({ cls: 'gantt-today-line' });
       todayLine.style.left = `${todayOffset * dayWidth}px`;
     }
+  }
 
-    // Grid lines (weekly)
+  private renderGanttGridLines(container: HTMLElement, minDate: Date, totalDays: number, dayWidth: number): void {
     for (let i = 0; i < totalDays; i++) {
       const date = new Date(minDate);
       date.setDate(date.getDate() + i);
       if (date.getDay() === 0) {
-        const gridLine = timelineBody.createDiv({ cls: 'gantt-grid-line' });
+        const gridLine = container.createDiv({ cls: 'gantt-grid-line' });
         gridLine.style.left = `${i * dayWidth}px`;
       }
     }
+  }
 
-    // Render each task
-    allTasks.forEach((task, index) => {
-      const nameRow = taskNames.createDiv({ cls: 'gantt-task-name' });
-      nameRow.setText(task.title);
+  private renderGanttTaskRow(taskNames: HTMLElement, timelineBody: HTMLElement, task: TimelineItem, minDate: Date, dayWidth: number): void {
+    const nameRow = taskNames.createDiv({ cls: 'gantt-task-name' });
+    nameRow.setText(task.title);
 
-      const timelineRow = timelineBody.createDiv({ cls: 'gantt-timeline-row' });
+    const timelineRow = timelineBody.createDiv({ cls: 'gantt-timeline-row' });
+    const taskStart = Math.max(0, Math.ceil((task.startDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const taskEnd = Math.ceil((task.endDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
+    const taskWidth = Math.max(taskEnd - taskStart, 1);
 
-      const taskStart = Math.max(0, Math.ceil((task.startDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24)));
-      const taskEnd = Math.ceil((task.endDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24));
-      const taskWidth = Math.max(taskEnd - taskStart, 1);
-
-      const bar = timelineRow.createDiv({
-        cls: `gantt-bar gantt-bar-${task.status}`,
-        attr: { 'data-task-id': task.id }
-      });
-      bar.style.left = `${taskStart * dayWidth}px`;
-      bar.style.width = `${taskWidth * dayWidth - 4}px`;
-      bar.style.backgroundColor = this.getTaskColor(task);
-
-      // Progress indicator
-      if (task.progress > 0) {
-        const progress = bar.createDiv({ cls: 'gantt-bar-progress' });
-        progress.style.width = `${task.progress}%`;
-      }
-
-      bar.setAttribute('title', `${task.title}\n${task.startDate.toLocaleDateString()} - ${task.endDate.toLocaleDateString()}\nProgress: ${task.progress}%`);
-
-      this.taskElements.set(task.id, bar);
-
-      bar.addEventListener('click', () => this.plugin.openEntity(task.id));
+    const bar = timelineRow.createDiv({
+      cls: `gantt-bar gantt-bar-${task.status}`,
+      attr: { 'data-task-id': task.id }
     });
+    bar.style.left = `${taskStart * dayWidth}px`;
+    bar.style.width = `${taskWidth * dayWidth - 4}px`;
+    bar.style.backgroundColor = this.getTaskColor(task);
+
+    if (task.progress > 0) {
+      const progress = bar.createDiv({ cls: 'gantt-bar-progress' });
+      progress.style.width = `${task.progress}%`;
+    }
+
+    bar.setAttribute('title', `${task.title}\n${task.startDate.toLocaleDateString()} - ${task.endDate.toLocaleDateString()}\nProgress: ${task.progress}%`);
+    this.taskElements.set(task.id, bar);
+    bar.addEventListener('click', () => this.plugin.openEntity(task.id));
   }
 
   // ==================== SHARED TIME GRID (for day, 3days, week) ====================
   private renderTimeGrid(container: HTMLElement, days: DayColumn[], tasks: TimelineItem[], numDays: number): void {
     const grid = container.createDiv({ cls: 'week-grid' });
 
+    // Dynamic grid template based on number of days
+    const gridTemplate = `60px repeat(${numDays}, 1fr)`;
+
     // Header row
     const headerRow = grid.createDiv({ cls: 'week-header-row' });
+    headerRow.style.gridTemplateColumns = gridTemplate;
     headerRow.createDiv({ cls: 'week-time-header' });
 
     days.forEach(day => {
@@ -605,6 +630,7 @@ export class TimelineView extends ItemView {
 
     HOURS.forEach(hour => {
       const hourRow = this.timeGridEl!.createDiv({ cls: 'week-hour-row' });
+      hourRow.style.gridTemplateColumns = gridTemplate;
       const timeLabel = hourRow.createDiv({ cls: 'week-time-cell' });
       const hourStr = hour === 0 ? '12 AM' : hour < 12 ? `${hour} AM` : hour === 12 ? '12 PM' : `${hour - 12} PM`;
       timeLabel.createSpan({ cls: 'week-hour-label', text: hourStr });
@@ -629,79 +655,93 @@ export class TimelineView extends ItemView {
   private renderTaskCards(timeGrid: HTMLElement, days: DayColumn[], tasks: TimelineItem[], numDays: number): void {
     Logger.info(`renderTaskCards() - START (${tasks.length} tasks, ${numDays} days)`);
     tasks.forEach(task => {
-      const dayIndex = days.findIndex(day => {
-        const dayStart = new Date(day.date);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(day.date);
-        dayEnd.setHours(23, 59, 59, 999);
-        return task.startDate >= dayStart && task.startDate <= dayEnd;
-      });
-
+      const dayIndex = this.findTaskDayIndex(task, days);
       if (dayIndex === -1) {
         Logger.warn(`renderTaskCards() - Task "${task.title}" not in visible day range, skipping`);
         return;
       }
       Logger.debug(`renderTaskCards() - Rendering task "${task.title}" on day ${dayIndex}`);
 
-      const card = timeGrid.createDiv({
-        cls: `week-task-card week-task-card-${task.status}`,
-        attr: { 'data-task-id': task.id }
-      });
-
-      const color = this.getTaskColor(task);
-      card.style.borderLeftColor = color;
-      card.style.setProperty('--task-color', color);
-
-      const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / ${numDays})`;
-      const startHour = task.startDate.getHours();
-      const startMinutes = task.startDate.getMinutes();
-      const endHour = task.endDate.getHours();
-      const endMinutes = task.endDate.getMinutes();
-
-      const topPosition = (startHour * HOUR_HEIGHT) + (startMinutes / 60 * HOUR_HEIGHT);
-      const durationMinutes = (endHour * 60 + endMinutes) - (startHour * 60 + startMinutes);
-      const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, HOUR_HEIGHT / 2);
-
-      card.style.left = `calc(${TIME_COLUMN_WIDTH}px + ${dayIndex} * ${dayWidth})`;
-      card.style.top = `${topPosition}px`;
-      card.style.width = `calc(${dayWidth} - 4px)`;
-      card.style.height = `${height}px`;
-
-      const cardHeader = card.createDiv({ cls: 'week-task-card-header' });
-      cardHeader.createDiv({ cls: 'week-task-card-title', text: task.title });
-
-      // Delete button
-      const deleteBtn = cardHeader.createDiv({ cls: 'week-task-delete-btn', text: '×' });
-      deleteBtn.setAttribute('title', 'Delete task');
-      deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (confirm(`Delete task "${task.title}"?`)) {
-          Logger.info(`Deleting task: ${task.id}`);
-          const success = await this.plugin.dataService.deleteEntity(task.id);
-          if (success) {
-            await this.render();
-          }
-        }
-      });
-
-      const timeStr = this.formatTime(task.startDate) + ' - ' + this.formatTime(task.endDate);
-      card.createDiv({ cls: 'week-task-card-time', text: timeStr });
-
-      // Resize handles
-      const resizeTop = card.createDiv({ cls: 'resize-handle resize-handle-top' });
-      const resizeBottom = card.createDiv({ cls: 'resize-handle resize-handle-bottom' });
-
-      // Connection handles
-      const leftHandle = card.createDiv({ cls: 'connection-handle connection-handle-left' });
-      leftHandle.setAttribute('data-task-id', task.id);
-      const rightHandle = card.createDiv({ cls: 'connection-handle connection-handle-right' });
-      rightHandle.setAttribute('data-task-id', task.id);
-
-      this.setupTaskDragHandlers(card, task, resizeTop, resizeBottom, rightHandle);
-      this.taskElements.set(task.id, card);
+      const card = this.createTaskCard(timeGrid, task, dayIndex, numDays);
+      this.setupTaskDragHandlers(card.element, task, card.resizeTop, card.resizeBottom, card.rightHandle);
+      this.taskElements.set(task.id, card.element);
     });
     Logger.success(`renderTaskCards() - END (rendered ${this.taskElements.size} task elements)`);
+  }
+
+  private findTaskDayIndex(task: TimelineItem, days: DayColumn[]): number {
+    return days.findIndex(day => {
+      const dayStart = new Date(day.date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(day.date);
+      dayEnd.setHours(23, 59, 59, 999);
+      return task.startDate >= dayStart && task.startDate <= dayEnd;
+    });
+  }
+
+  private createTaskCard(timeGrid: HTMLElement, task: TimelineItem, dayIndex: number, numDays: number): {
+    element: HTMLElement; resizeTop: HTMLElement; resizeBottom: HTMLElement; rightHandle: HTMLElement;
+  } {
+    const card = timeGrid.createDiv({
+      cls: `week-task-card week-task-card-${task.status}`,
+      attr: { 'data-task-id': task.id }
+    });
+
+    const color = this.getTaskColor(task);
+    card.style.borderLeftColor = color;
+    card.style.setProperty('--task-color', color);
+
+    this.positionTaskCard(card, task, dayIndex, numDays);
+    this.createTaskCardContent(card, task);
+
+    const resizeTop = card.createDiv({ cls: 'resize-handle resize-handle-top' });
+    const resizeBottom = card.createDiv({ cls: 'resize-handle resize-handle-bottom' });
+
+    const leftHandle = card.createDiv({ cls: 'connection-handle connection-handle-left' });
+    leftHandle.setAttribute('data-task-id', task.id);
+    const rightHandle = card.createDiv({ cls: 'connection-handle connection-handle-right' });
+    rightHandle.setAttribute('data-task-id', task.id);
+
+    return { element: card, resizeTop, resizeBottom, rightHandle };
+  }
+
+  private positionTaskCard(card: HTMLElement, task: TimelineItem, dayIndex: number, numDays: number): void {
+    const dayWidth = `calc((100% - ${TIME_COLUMN_WIDTH}px) / ${numDays})`;
+    const startHour = task.startDate.getHours();
+    const startMinutes = task.startDate.getMinutes();
+    const endHour = task.endDate.getHours();
+    const endMinutes = task.endDate.getMinutes();
+
+    const topPosition = (startHour * HOUR_HEIGHT) + (startMinutes / 60 * HOUR_HEIGHT);
+    const durationMinutes = (endHour * 60 + endMinutes) - (startHour * 60 + startMinutes);
+    const height = Math.max((durationMinutes / 60) * HOUR_HEIGHT, HOUR_HEIGHT / 2);
+
+    card.style.left = `calc(${TIME_COLUMN_WIDTH}px + ${dayIndex} * ${dayWidth})`;
+    card.style.top = `${topPosition}px`;
+    card.style.width = `calc(${dayWidth} - 4px)`;
+    card.style.height = `${height}px`;
+  }
+
+  private createTaskCardContent(card: HTMLElement, task: TimelineItem): void {
+    const cardHeader = card.createDiv({ cls: 'week-task-card-header' });
+    cardHeader.createDiv({ cls: 'week-task-card-title', text: task.title });
+
+    const deleteBtn = cardHeader.createDiv({ cls: 'week-task-delete-btn', text: '×' });
+    deleteBtn.setAttribute('title', 'Delete task');
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (confirm(`Delete task "${task.title}"?`)) {
+        Logger.info(`Deleting task: ${task.id}`);
+        const success = await this.plugin.dataService.deleteEntity(task.id);
+        if (success) {
+          await this.render();
+        }
+      }
+    });
+
+    const timeStr = this.formatTime(task.startDate) + ' - ' + this.formatTime(task.endDate);
+    card.createDiv({ cls: 'week-task-card-time', text: timeStr });
   }
 
   private renderCurrentTimeIndicator(timeGrid: HTMLElement, days: DayColumn[], numDays: number): void {
@@ -911,12 +951,12 @@ export class TimelineView extends ItemView {
       e.stopPropagation();
       this.startConnectionDrag(task.id, e);
     });
-
-    // Update grid template
-    grid.style.gridTemplateColumns = `${isMobile() ? '120px' : '150px'} repeat(${columnCount}, minmax(${isMobile() ? '50px' : '60px'}, 1fr))`;
   }
 
   private startTaskDrag(taskId: string, e: MouseEvent): void {
+    // Cancel any existing drag operations first
+    this.cancelAllDragOperations();
+
     const task = this.plugin.dataService.getEntity(taskId) as Task | undefined;
     if (!task) return;
 
@@ -931,6 +971,9 @@ export class TimelineView extends ItemView {
   }
 
   private startTaskResize(taskId: string, edge: 'top' | 'bottom', e: MouseEvent): void {
+    // Cancel any existing drag operations first
+    this.cancelAllDragOperations();
+
     const task = this.plugin.dataService.getEntity(taskId) as Task | undefined;
     if (!task) return;
 
@@ -1049,46 +1092,57 @@ export class TimelineView extends ItemView {
     if (this.isDraggingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
+      const taskIdToUpdate = this.draggedTaskId;
+      const originalStart = this.originalStartDate;
+      const originalEnd = this.originalEndDate;
+
+      // Clear drag state BEFORE async operations to prevent re-entry
+      this.endTaskDrag();
 
       if (deltaMinutes !== 0) {
-        const newStartDate = new Date(this.originalStartDate);
+        const newStartDate = new Date(originalStart);
         newStartDate.setMinutes(newStartDate.getMinutes() + deltaMinutes);
 
-        const newEndDate = new Date(this.originalEndDate);
+        const newEndDate = new Date(originalEnd);
         newEndDate.setMinutes(newEndDate.getMinutes() + deltaMinutes);
 
-        await this.plugin.dataService.updateEntity(this.draggedTaskId, {
+        await this.plugin.dataService.updateEntity(taskIdToUpdate, {
           startDate: newStartDate,
           dueDate: newEndDate
         });
 
         await this.renderPreservingScroll();
       }
-
-      this.endTaskDrag();
       return;
     }
 
     if (this.isResizingTask && this.draggedTaskId && this.originalStartDate && this.originalEndDate) {
       const deltaY = e.clientY - this.dragStartY;
       const deltaMinutes = Math.round(deltaY / (HOUR_HEIGHT / 60) / SNAP_MINUTES) * SNAP_MINUTES;
+      const taskIdToUpdate = this.draggedTaskId;
+      const originalStart = this.originalStartDate;
+      const originalEnd = this.originalEndDate;
+      const edge = this.resizeEdge;
+
+      // Clear resize state BEFORE async operations to prevent re-entry
+      this.endTaskResize();
 
       if (deltaMinutes !== 0) {
-        if (this.resizeEdge === 'top') {
-          const newStartDate = new Date(this.originalStartDate);
+        if (edge === 'top') {
+          const newStartDate = new Date(originalStart);
           newStartDate.setMinutes(newStartDate.getMinutes() + deltaMinutes);
 
-          if (newStartDate < this.originalEndDate) {
-            await this.plugin.dataService.updateEntity(this.draggedTaskId, {
+          if (newStartDate < originalEnd) {
+            await this.plugin.dataService.updateEntity(taskIdToUpdate, {
               startDate: newStartDate
             });
           }
-        } else if (this.resizeEdge === 'bottom') {
-          const newEndDate = new Date(this.originalEndDate);
+        } else if (edge === 'bottom') {
+          const newEndDate = new Date(originalEnd);
           newEndDate.setMinutes(newEndDate.getMinutes() + deltaMinutes);
 
-          if (newEndDate > this.originalStartDate) {
-            await this.plugin.dataService.updateEntity(this.draggedTaskId, {
+          if (newEndDate > originalStart) {
+            await this.plugin.dataService.updateEntity(taskIdToUpdate, {
               dueDate: newEndDate
             });
           }
@@ -1096,9 +1150,20 @@ export class TimelineView extends ItemView {
 
         await this.renderPreservingScroll();
       }
-
-      this.endTaskResize();
       return;
+    }
+  }
+
+  private cancelAllDragOperations(): void {
+    // Reset all drag states to prevent state pollution between operations
+    if (this.isDraggingTask) {
+      this.endTaskDrag();
+    }
+    if (this.isResizingTask) {
+      this.endTaskResize();
+    }
+    if (this.isDraggingConnection) {
+      this.endConnectionDrag();
     }
   }
 

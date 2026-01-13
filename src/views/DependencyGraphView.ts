@@ -9,6 +9,10 @@ interface GraphNode {
   title: string;
   x: number;
   y: number;
+  vx: number;  // velocity x for force simulation
+  vy: number;  // velocity y for force simulation
+  fx: number | null;  // fixed x (for dragging)
+  fy: number | null;  // fixed y (for dragging)
   dependencies: string[];
   dependents: string[];
   isCritical: boolean;
@@ -30,6 +34,13 @@ const NODE_HEIGHT = 60;
 const LEVEL_GAP = 200;
 const NODE_GAP = 80;
 
+// Force simulation constants
+const REPULSION_STRENGTH = 5000;  // How strongly nodes repel each other
+const ATTRACTION_STRENGTH = 0.05;  // How strongly connected nodes attract
+const CENTER_GRAVITY = 0.01;  // Pull toward center
+const DAMPING = 0.9;  // Velocity damping
+const MIN_VELOCITY = 0.1;  // Stop simulation when velocity is below this
+
 const PROJECT_COLORS = [
   '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
   '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
@@ -50,6 +61,9 @@ export class DependencyGraphView extends ItemView {
   private isPanning: boolean = false;
   private lastMouseX: number = 0;
   private lastMouseY: number = 0;
+  private animationId: number | null = null;
+  private isSimulating: boolean = false;
+  private draggedNodeId: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: TimelineViewerPlugin) {
     super(leaf);
@@ -128,8 +142,12 @@ export class DependencyGraphView extends ItemView {
       this.nodes.set(task.id, {
         id: task.id,
         title: task.title,
-        x: 0,
-        y: 0,
+        x: Math.random() * 400 + 100,  // Random initial position
+        y: Math.random() * 400 + 100,
+        vx: 0,
+        vy: 0,
+        fx: null,
+        fy: null,
         dependencies: dependencies,
         dependents: [],
         isCritical: false,
@@ -158,59 +176,154 @@ export class DependencyGraphView extends ItemView {
   }
 
   private calculateLayout(): void {
-    // Calculate levels using topological sort
-    const inDegree = new Map<string, number>();
-    this.nodes.forEach((node, id) => {
-      inDegree.set(id, node.dependencies.filter(d => this.nodes.has(d)).length);
+    // Initialize random positions spread across canvas
+    const centerX = 400;
+    const centerY = 300;
+    let index = 0;
+    this.nodes.forEach(node => {
+      const angle = (index / this.nodes.size) * 2 * Math.PI;
+      const radius = 150 + Math.random() * 100;
+      node.x = centerX + Math.cos(angle) * radius;
+      node.y = centerY + Math.sin(angle) * radius;
+      node.vx = 0;
+      node.vy = 0;
+      index++;
     });
 
-    // Find root nodes (no dependencies)
-    const queue: string[] = [];
-    inDegree.forEach((degree, id) => {
-      if (degree === 0) {
-        queue.push(id);
-        const node = this.nodes.get(id);
-        if (node) node.level = 0;
+    // Run simulation for a fixed number of iterations to stabilize
+    for (let i = 0; i < 100; i++) {
+      this.simulateForces();
+    }
+  }
+
+  private simulateForces(): void {
+    const nodesArray = Array.from(this.nodes.values());
+    const centerX = 400;
+    const centerY = 300;
+
+    // Reset forces
+    nodesArray.forEach(node => {
+      if (node.fx !== null) node.x = node.fx;
+      if (node.fy !== null) node.y = node.fy;
+    });
+
+    // Apply repulsion between all nodes
+    for (let i = 0; i < nodesArray.length; i++) {
+      for (let j = i + 1; j < nodesArray.length; j++) {
+        const nodeA = nodesArray[i];
+        const nodeB = nodesArray[j];
+        const dx = nodeB.x - nodeA.x;
+        const dy = nodeB.y - nodeA.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const force = REPULSION_STRENGTH / (dist * dist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        if (nodeA.fx === null) { nodeA.vx -= fx; nodeA.vy -= fy; }
+        if (nodeB.fx === null) { nodeB.vx += fx; nodeB.vy += fy; }
       }
-    });
-
-    // BFS to assign levels
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
-      const currentNode = this.nodes.get(currentId)!;
-
-      currentNode.dependents.forEach(depId => {
-        const depNode = this.nodes.get(depId);
-        if (depNode) {
-          depNode.level = Math.max(depNode.level, currentNode.level + 1);
-          const newDegree = (inDegree.get(depId) || 0) - 1;
-          inDegree.set(depId, newDegree);
-          if (newDegree === 0) {
-            queue.push(depId);
-          }
-        }
-      });
     }
 
-    // Group nodes by level
-    const levels = new Map<number, GraphNode[]>();
-    this.nodes.forEach(node => {
-      const level = node.level;
-      if (!levels.has(level)) {
-        levels.set(level, []);
-      }
-      levels.get(level)!.push(node);
+    // Apply attraction along edges
+    this.edges.forEach(edge => {
+      const source = this.nodes.get(edge.from);
+      const target = this.nodes.get(edge.to);
+      if (!source || !target) return;
+
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = dist * ATTRACTION_STRENGTH;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+
+      if (source.fx === null) { source.vx += fx; source.vy += fy; }
+      if (target.fx === null) { target.vx -= fx; target.vy -= fy; }
     });
 
-    // Assign x, y positions
-    levels.forEach((nodesAtLevel, level) => {
-      const totalHeight = nodesAtLevel.length * (NODE_HEIGHT + NODE_GAP) - NODE_GAP;
-      const startY = -totalHeight / 2;
+    // Apply center gravity
+    nodesArray.forEach(node => {
+      if (node.fx !== null) return;
+      const dx = centerX - node.x;
+      const dy = centerY - node.y;
+      node.vx += dx * CENTER_GRAVITY;
+      node.vy += dy * CENTER_GRAVITY;
+    });
 
-      nodesAtLevel.forEach((node, index) => {
-        node.x = level * LEVEL_GAP + 100;
-        node.y = startY + index * (NODE_HEIGHT + NODE_GAP) + 200;
+    // Update positions with damping
+    nodesArray.forEach(node => {
+      if (node.fx !== null) return;
+      node.vx *= DAMPING;
+      node.vy *= DAMPING;
+      node.x += node.vx;
+      node.y += node.vy;
+    });
+  }
+
+  private startForceSimulation(): void {
+    if (this.isSimulating) return;
+    this.isSimulating = true;
+
+    const animate = () => {
+      if (!this.isSimulating) return;
+
+      this.simulateForces();
+      this.updateNodePositions();
+
+      // Check if simulation has stabilized
+      let totalVelocity = 0;
+      this.nodes.forEach(node => {
+        totalVelocity += Math.abs(node.vx) + Math.abs(node.vy);
       });
+
+      if (totalVelocity > MIN_VELOCITY * this.nodes.size) {
+        this.animationId = requestAnimationFrame(animate);
+      } else {
+        this.isSimulating = false;
+      }
+    };
+
+    animate();
+  }
+
+  private stopForceSimulation(): void {
+    this.isSimulating = false;
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+  }
+
+  private updateNodePositions(): void {
+    if (!this.graphContainer) return;
+
+    this.nodes.forEach((node, id) => {
+      const nodeEl = this.graphContainer?.querySelector(`[data-node-id="${id}"]`) as HTMLElement;
+      if (nodeEl) {
+        nodeEl.style.left = `${node.x}px`;
+        nodeEl.style.top = `${node.y}px`;
+      }
+    });
+
+    // Update edge positions
+    this.updateEdgePositions();
+  }
+
+  private updateEdgePositions(): void {
+    if (!this.svgEl) return;
+
+    this.edges.forEach(edge => {
+      const lineEl = this.svgEl?.querySelector(`[data-edge-from="${edge.from}"][data-edge-to="${edge.to}"]`) as SVGLineElement;
+      if (!lineEl) return;
+
+      const source = this.nodes.get(edge.from);
+      const target = this.nodes.get(edge.to);
+      if (!source || !target) return;
+
+      lineEl.setAttribute('x1', String(source.x + NODE_WIDTH / 2));
+      lineEl.setAttribute('y1', String(source.y + NODE_HEIGHT / 2));
+      lineEl.setAttribute('x2', String(target.x + NODE_WIDTH / 2));
+      lineEl.setAttribute('y2', String(target.y + NODE_HEIGHT / 2));
     });
   }
 
