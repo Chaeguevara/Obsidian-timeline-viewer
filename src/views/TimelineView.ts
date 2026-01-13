@@ -911,6 +911,9 @@ export class TimelineView extends ItemView {
       e.stopPropagation();
       this.startConnectionDrag(task.id, e);
     });
+
+    // Update grid template
+    grid.style.gridTemplateColumns = `${isMobile() ? '120px' : '150px'} repeat(${columnCount}, minmax(${isMobile() ? '50px' : '60px'}, 1fr))`;
   }
 
   private startTaskDrag(taskId: string, e: MouseEvent): void {

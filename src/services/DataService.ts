@@ -190,8 +190,14 @@ export class DataService {
           startDate: this.parseDate(frontmatter.startDate),
           dueDate: this.parseDate(frontmatter.dueDate),
           priority: (frontmatter.priority || 'medium') as Priority,
+          assignee: frontmatter.assignee,
+          collaborators: frontmatter.collaborators || [],
           dependencies: frontmatter.dependencies || [],
           progress: frontmatter.progress || 0,
+          estimatedHours: frontmatter.estimatedHours,
+          actualHours: frontmatter.actualHours,
+          tags: frontmatter.tags || [],
+          order: frontmatter.order,
         } as Task;
 
       default:
@@ -917,5 +923,186 @@ export class DataService {
     }
 
     return content.replace(/^---\n[\s\S]*?\n---/, `---\n${updatedLines.join('\n')}\n---`);
+  }
+
+  // ==================== Board & List View Methods ====================
+
+  /**
+   * Get all tasks
+   */
+  getAllTasks(): Task[] {
+    return this.getEntitiesByType<Task>('task');
+  }
+
+  /**
+   * Get tasks by status (for Board view columns)
+   */
+  getTasksByStatus(status: Status): Task[] {
+    return this.getAllTasks().filter(task => task.status === status);
+  }
+
+  /**
+   * Get tasks by project
+   */
+  getTasksByProject(projectId: string): Task[] {
+    return this.getAllTasks().filter(task => task.projectId === projectId);
+  }
+
+  /**
+   * Get tasks by assignee
+   */
+  getTasksByAssignee(assignee: string): Task[] {
+    return this.getAllTasks().filter(task => task.assignee === assignee);
+  }
+
+  /**
+   * Get overdue tasks
+   */
+  getOverdueTasks(): Task[] {
+    const now = new Date();
+    return this.getAllTasks().filter(task =>
+      task.dueDate &&
+      task.dueDate < now &&
+      task.status !== 'completed' &&
+      task.status !== 'cancelled'
+    );
+  }
+
+  /**
+   * Get tasks due today
+   */
+  getTasksDueToday(): Task[] {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    return this.getAllTasks().filter(task =>
+      task.dueDate &&
+      task.dueDate >= today &&
+      task.dueDate < tomorrow &&
+      task.status !== 'completed' &&
+      task.status !== 'cancelled'
+    );
+  }
+
+  /**
+   * Update task status
+   */
+  async updateTaskStatus(taskId: string, status: Status): Promise<void> {
+    const task = this.cache.get(taskId) as Task | undefined;
+    if (!task || !task.filePath) return;
+
+    const file = this.app.vault.getAbstractFileByPath(task.filePath);
+    if (!file || !(file instanceof TFile)) return;
+
+    const content = await this.app.vault.read(file);
+
+    // Update status in frontmatter
+    let updatedContent = content.replace(
+      /^(status:\s*).+$/m,
+      `$1${status}`
+    );
+
+    // Update completedDate if completing
+    if (status === 'completed') {
+      const completedDate = new Date().toISOString().split('T')[0];
+      if (updatedContent.includes('completedDate:')) {
+        updatedContent = updatedContent.replace(
+          /^(completedDate:\s*).+$/m,
+          `$1${completedDate}`
+        );
+      } else {
+        // Add completedDate after status
+        updatedContent = updatedContent.replace(
+          /^(status:\s*.+)$/m,
+          `$1\ncompletedDate: ${completedDate}`
+        );
+      }
+      // Set progress to 100%
+      if (updatedContent.includes('progress:')) {
+        updatedContent = updatedContent.replace(
+          /^(progress:\s*).+$/m,
+          `$1100`
+        );
+      }
+    } else {
+      // If reopening, remove completedDate
+      updatedContent = updatedContent.replace(/^completedDate:\s*.+\n/m, '');
+    }
+
+    // Update updatedAt
+    updatedContent = updatedContent.replace(
+      /^(updatedAt:\s*).+$/m,
+      `$1${new Date().toISOString()}`
+    );
+
+    await this.app.vault.modify(file, updatedContent);
+    await this.refreshCache();
+  }
+
+  /**
+   * Move task to a different project
+   */
+  async moveTaskToProject(taskId: string, projectId: string | null): Promise<void> {
+    const task = this.cache.get(taskId) as Task | undefined;
+    if (!task || !task.filePath) return;
+
+    const file = this.app.vault.getAbstractFileByPath(task.filePath);
+    if (!file || !(file instanceof TFile)) return;
+
+    const content = await this.app.vault.read(file);
+    const projectLink = projectId ? `"[[${projectId}]]"` : '';
+
+    let updatedContent: string;
+    if (content.includes('project:')) {
+      updatedContent = content.replace(/^(project:\s*).+$/m, `$1${projectLink}`);
+    } else {
+      updatedContent = content.replace(/^(status:\s*.+)$/m, `$1\nproject: ${projectLink}`);
+    }
+
+    await this.app.vault.modify(file, updatedContent);
+    await this.refreshCache();
+  }
+
+  /**
+   * Get subtasks for a parent task
+   */
+  getSubtasks(parentTaskId: string): Task[] {
+    return this.getAllTasks().filter(task => task.parentTaskId === parentTaskId);
+  }
+
+  /**
+   * Get blocked tasks (tasks with incomplete dependencies)
+   */
+  getBlockedTasks(): Task[] {
+    return this.getAllTasks().filter(task => {
+      if (!task.dependencies || task.dependencies.length === 0) return false;
+
+      return task.dependencies.some(dep => {
+        const depTask = this.cache.get(typeof dep === 'string' ? dep : dep.taskId) as Task | undefined;
+        return depTask && depTask.status !== 'completed';
+      });
+    });
+  }
+
+  /**
+   * Get tasks that block other tasks
+   */
+  getBlockerTasks(): Task[] {
+    const blockerIds = new Set<string>();
+
+    this.getAllTasks().forEach(task => {
+      if (task.dependencies) {
+        task.dependencies.forEach(dep => {
+          const depId = typeof dep === 'string' ? dep : dep.taskId;
+          blockerIds.add(depId);
+        });
+      }
+    });
+
+    return this.getAllTasks().filter(task =>
+      blockerIds.has(task.id) && task.status !== 'completed'
+    );
   }
 }

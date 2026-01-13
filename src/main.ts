@@ -152,6 +152,9 @@ export default class TimelineViewerPlugin extends Plugin {
     // Clean up views
     this.app.workspace.detachLeavesOfType(TIMELINE_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(WBS_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(BOARD_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(LIST_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(MY_TASKS_VIEW_TYPE);
   }
 
   async loadSettings(): Promise<void> {
@@ -225,6 +228,13 @@ export default class TimelineViewerPlugin extends Plugin {
     if (file) {
       await this.app.workspace.getLeaf().openFile(file as import('obsidian').TFile);
     }
+  }
+
+  /**
+   * Edit an entity (opens file in edit mode)
+   */
+  async editEntity(id: string): Promise<void> {
+    await this.openEntity(id);
   }
 }
 
