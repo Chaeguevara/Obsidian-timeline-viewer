@@ -1419,4 +1419,168 @@ export class DataService {
       blockerIds.has(task.id) && task.status !== 'completed'
     );
   }
+
+  // ==================== PARA Query Methods ====================
+
+  /**
+   * Get all entities by PARA category
+   *
+   * Filters entities based on their PARA category assignment.
+   * Works in PARA organization mode.
+   *
+   * @param category - PARA category to filter by
+   * @returns Array of entities in that category
+   *
+   * @example
+   * // Get all active projects
+   * const activeProjects = dataService.getEntitiesByPARACategory('project');
+   *
+   * @example
+   * // Get all areas
+   * const areas = dataService.getEntitiesByPARACategory('area');
+   */
+  getEntitiesByPARACategory(category: import('./models/types').PARACategory): import('./models/types').Entity[] {
+    return Array.from(this.cache.values()).filter(entity => {
+      // For projects, check paraCategory field
+      if ('paraCategory' in entity) {
+        return entity.paraCategory === category;
+      }
+      // For Area and Resource types, check entity type
+      if (category === 'area' && entity.type === 'area') return true;
+      if (category === 'resource' && entity.type === 'resource') return true;
+      // Archives are projects with paraCategory === 'archive'
+      return false;
+    });
+  }
+
+  /**
+   * Get active projects (PARA mode)
+   *
+   * Returns projects that are not archived and have a future or no end date.
+   *
+   * @returns Array of active projects
+   */
+  getActiveProjects(): import('./models/types').Project[] {
+    const projects = this.getEntitiesByType<import('./models/types').Project>('project');
+    const now = new Date();
+
+    return projects.filter(project => {
+      // Exclude archived projects
+      if (project.paraCategory === 'archive') return false;
+
+      // Include if no end date (ongoing) or end date is in future
+      if (!project.endDate) return true;
+      return new Date(project.endDate) > now;
+    });
+  }
+
+  /**
+   * Get archived projects (PARA mode)
+   *
+   * Returns projects marked as archived or with completed/cancelled status.
+   *
+   * @returns Array of archived projects
+   */
+  getArchivedProjects(): import('./models/types').Project[] {
+    const projects = this.getEntitiesByType<import('./models/types').Project>('project');
+
+    return projects.filter(project =>
+      project.paraCategory === 'archive' ||
+      project.status === 'completed' ||
+      project.status === 'cancelled'
+    );
+  }
+
+  /**
+   * Get all areas (PARA mode)
+   *
+   * Returns all Area entities representing ongoing responsibilities.
+   *
+   * @returns Array of areas
+   */
+  getAllAreas(): import('./models/types').Area[] {
+    return this.getEntitiesByType<import('./models/types').Area>('area');
+  }
+
+  /**
+   * Get all resources (PARA mode)
+   *
+   * Returns all Resource entities representing reference material.
+   *
+   * @param category - Optional category filter
+   * @returns Array of resources
+   *
+   * @example
+   * // Get all resources
+   * const allResources = dataService.getAllResources();
+   *
+   * @example
+   * // Get documentation resources only
+   * const docs = dataService.getAllResources().filter(r => r.resourceType === 'documentation');
+   */
+  getAllResources(category?: string): import('./models/types').Resource[] {
+    const resources = this.getEntitiesByType<import('./models/types').Resource>('resource');
+
+    if (category) {
+      return resources.filter(r => r.category === category);
+    }
+
+    return resources;
+  }
+
+  /**
+   * Get projects related to an area (PARA mode)
+   *
+   * Finds all projects spawned from or related to a specific area.
+   *
+   * @param areaId - Area ID to find related projects for
+   * @returns Array of projects related to the area
+   */
+  getProjectsForArea(areaId: string): import('./models/types').Project[] {
+    const projects = this.getActiveProjects();
+    return projects.filter(project => project.relatedAreaId === areaId);
+  }
+
+  /**
+   * Archive a project (PARA mode)
+   *
+   * Moves a project to the archives by setting its paraCategory to 'archive'.
+   * Updates the archivedDate field.
+   *
+   * @param projectId - Project ID to archive
+   * @returns Promise that resolves when archiving is complete
+   */
+  async archiveProject(projectId: string): Promise<void> {
+    const project = this.getEntity(projectId);
+    if (!project || project.type !== 'project') {
+      throw new Error('Project not found');
+    }
+
+    await this.updateEntity(projectId, {
+      paraCategory: 'archive' as import('./models/types').PARACategory,
+      archivedDate: new Date(),
+      status: 'completed' as import('./models/types').Status,
+    });
+  }
+
+  /**
+   * Restore an archived project (PARA mode)
+   *
+   * Moves a project back from archives to active projects.
+   *
+   * @param projectId - Project ID to restore
+   * @returns Promise that resolves when restoration is complete
+   */
+  async restoreProject(projectId: string): Promise<void> {
+    const project = this.getEntity(projectId);
+    if (!project || project.type !== 'project') {
+      throw new Error('Project not found');
+    }
+
+    await this.updateEntity(projectId, {
+      paraCategory: 'project' as import('./models/types').PARACategory,
+      archivedDate: undefined,
+      status: 'in-progress' as import('./models/types').Status,
+    });
+  }
 }

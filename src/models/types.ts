@@ -9,7 +9,23 @@ export type Status = 'not-started' | 'in-progress' | 'completed' | 'on-hold' | '
 
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
-export type EntityType = 'goal' | 'portfolio' | 'project' | 'section' | 'milestone' | 'task';
+export type EntityType = 'goal' | 'portfolio' | 'project' | 'section' | 'milestone' | 'task' | 'area' | 'resource';
+
+/**
+ * PARA Categories for organizational mode
+ * Projects: Active work with deadlines
+ * Areas: Ongoing responsibilities without deadlines
+ * Resources: Reference material and knowledge base
+ * Archives: Completed or inactive items
+ */
+export type PARACategory = 'project' | 'area' | 'resource' | 'archive';
+
+/**
+ * Organization mode for the vault
+ * - hierarchical: Goal → Portfolio → Project → Task (default)
+ * - para: Projects, Areas, Resources, Archives (Tiago Forte's method)
+ */
+export type OrganizationMode = 'hierarchical' | 'para';
 
 export type DependencyType = 'finish-to-start' | 'start-to-start' | 'finish-to-finish' | 'start-to-finish';
 
@@ -81,6 +97,10 @@ export interface Portfolio extends BaseEntity {
 /**
  * Project - A defined piece of work with timeline (like Asana Projects)
  * Contains sections, milestones, and tasks
+ *
+ * **PARA Support:**
+ * In PARA mode, projects have clear deadlines and end dates.
+ * When completed or cancelled, they move to Archives.
  */
 export interface Project extends BaseEntity {
   type: 'project';
@@ -96,6 +116,11 @@ export interface Project extends BaseEntity {
   color?: string;
   defaultView?: 'list' | 'board' | 'timeline' | 'calendar';
   template?: boolean; // Is this a project template?
+
+  // PARA-specific fields
+  paraCategory?: PARACategory; // 'project' for active, 'archive' for completed
+  relatedAreaId?: string; // The area this project belongs to (PARA mode)
+  archivedDate?: Date; // When moved to archive
 }
 
 /**
@@ -145,6 +170,38 @@ export interface Task extends BaseEntity {
   attachments?: string[]; // Links to files
   comments?: Comment[];
   order?: number; // Sort order within section
+}
+
+/**
+ * Area - Ongoing responsibility without deadline (PARA methodology)
+ * Represents ongoing areas of life/work that require maintenance
+ * Examples: "Health & Fitness", "Team Management", "Client Relations"
+ */
+export interface Area extends BaseEntity {
+  type: 'area';
+  paraCategory: 'area';
+  taskIds?: string[]; // Related tasks
+  standard?: string; // The standard to maintain (e.g., "Exercise 3x/week")
+  reviewFrequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly';
+  lastReviewDate?: Date;
+  owner?: string;
+  relatedProjectIds?: string[]; // Projects spawned from this area
+}
+
+/**
+ * Resource - Reference material and knowledge base (PARA methodology)
+ * Non-actionable information organized by topic
+ * Examples: "Design Systems", "API Documentation", "Meeting Templates"
+ */
+export interface Resource extends BaseEntity {
+  type: 'resource';
+  paraCategory: 'resource';
+  category?: string; // Topic category
+  sourceUrl?: string; // External reference
+  relatedAreas?: string[]; // Areas this resource supports
+  relatedProjects?: string[]; // Projects this resource supports
+  resourceType?: 'documentation' | 'template' | 'reference' | 'tool' | 'learning';
+  lastAccessedDate?: Date;
 }
 
 // ==================== Supporting Types ====================
@@ -200,7 +257,7 @@ export interface Activity {
 /**
  * Union type for all entities
  */
-export type Entity = Goal | Portfolio | Project | Section | Milestone | Task;
+export type Entity = Goal | Portfolio | Project | Section | Milestone | Task | Area | Resource;
 
 // ==================== Frontmatter ====================
 

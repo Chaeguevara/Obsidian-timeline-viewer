@@ -1,10 +1,20 @@
 import { App, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type TimelineViewerPlugin from './main';
+import type { OrganizationMode } from './models/types';
 
 export interface TimelineViewerSettings {
+  // Organization mode
+  organizationMode: OrganizationMode; // 'hierarchical' or 'para'
+
   // Folder settings
   rootFolder: string; // Root folder for all timeline viewer files
   useNestedFolders: boolean; // Whether to use nested folder structure
+
+  // PARA-specific folders (used when organizationMode === 'para')
+  paraProjectsFolder: string;
+  paraAreasFolder: string;
+  paraResourcesFolder: string;
+  paraArchivesFolder: string;
 
   // Legacy flat folder settings (kept for backwards compatibility)
   goalsFolder: string;
@@ -34,12 +44,22 @@ export interface TimelineViewerSettings {
 }
 
 export const DEFAULT_SETTINGS: TimelineViewerSettings = {
+  organizationMode: 'hierarchical', // Default to hierarchical mode
   rootFolder: 'Timeline Viewer',
   useNestedFolders: true,
+
+  // PARA folders
+  paraProjectsFolder: '1. Projects',
+  paraAreasFolder: '2. Areas',
+  paraResourcesFolder: '3. Resources',
+  paraArchivesFolder: '4. Archives',
+
+  // Hierarchical folders (legacy)
   goalsFolder: 'Goals',
   portfoliosFolder: 'Portfolios',
   projectsFolder: 'Projects',
   tasksFolder: 'Tasks',
+
   defaultView: 'timeline',
   timelineScale: 'week',
   showCompletedItems: true,
@@ -72,6 +92,23 @@ export class TimelineViewerSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Timeline Viewer Settings' });
 
+    // Organization Mode
+    containerEl.createEl('h3', { text: 'Organization Mode' });
+
+    new Setting(containerEl)
+      .setName('Organization method')
+      .setDesc('Choose how to organize your work: Hierarchical (Goal→Portfolio→Project→Task) or PARA (Projects, Areas, Resources, Archives)')
+      .addDropdown(dropdown => dropdown
+        .addOption('hierarchical', 'Hierarchical (Goal → Portfolio → Project → Task)')
+        .addOption('para', 'PARA (Projects, Areas, Resources, Archives)')
+        .setValue(this.plugin.settings.organizationMode)
+        .onChange(async (value: OrganizationMode) => {
+          this.plugin.settings.organizationMode = value;
+          await this.plugin.saveSettings();
+          // Re-display to show/hide relevant sections
+          this.display();
+        }));
+
     // Folder Settings
     containerEl.createEl('h3', { text: 'Folders' });
 
@@ -86,59 +123,107 @@ export class TimelineViewerSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(containerEl)
-      .setName('Use nested folders')
-      .setDesc('Organize files hierarchically: Goals > Portfolios > Projects > Tasks')
-      .addToggle(toggle => toggle
-        .setValue(this.plugin.settings.useNestedFolders)
-        .onChange(async (value) => {
-          this.plugin.settings.useNestedFolders = value;
-          await this.plugin.saveSettings();
-        }));
+    // Conditional folders based on organization mode
+    if (this.plugin.settings.organizationMode === 'hierarchical') {
+      new Setting(containerEl)
+        .setName('Use nested folders')
+        .setDesc('Organize files hierarchically: Goals > Portfolios > Projects > Tasks')
+        .addToggle(toggle => toggle
+          .setValue(this.plugin.settings.useNestedFolders)
+          .onChange(async (value) => {
+            this.plugin.settings.useNestedFolders = value;
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('Goals folder')
-      .setDesc('Folder where goal files are stored (flat structure only)')
-      .addText(text => text
-        .setPlaceholder('Goals')
-        .setValue(this.plugin.settings.goalsFolder)
-        .onChange(async (value) => {
-          this.plugin.settings.goalsFolder = value;
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('Goals folder')
+        .setDesc('Folder where goal files are stored (flat structure only)')
+        .addText(text => text
+          .setPlaceholder('Goals')
+          .setValue(this.plugin.settings.goalsFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.goalsFolder = value;
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('Portfolios folder')
-      .setDesc('Folder where portfolio files are stored')
-      .addText(text => text
-        .setPlaceholder('Portfolios')
-        .setValue(this.plugin.settings.portfoliosFolder)
-        .onChange(async (value) => {
-          this.plugin.settings.portfoliosFolder = value;
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('Portfolios folder')
+        .setDesc('Folder where portfolio files are stored')
+        .addText(text => text
+          .setPlaceholder('Portfolios')
+          .setValue(this.plugin.settings.portfoliosFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.portfoliosFolder = value;
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('Projects folder')
-      .setDesc('Folder where project files are stored')
-      .addText(text => text
-        .setPlaceholder('Projects')
-        .setValue(this.plugin.settings.projectsFolder)
-        .onChange(async (value) => {
-          this.plugin.settings.projectsFolder = value;
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('Projects folder')
+        .setDesc('Folder where project files are stored')
+        .addText(text => text
+          .setPlaceholder('Projects')
+          .setValue(this.plugin.settings.projectsFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.projectsFolder = value;
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('Tasks folder')
-      .setDesc('Folder where task files are stored')
-      .addText(text => text
-        .setPlaceholder('Tasks')
-        .setValue(this.plugin.settings.tasksFolder)
-        .onChange(async (value) => {
-          this.plugin.settings.tasksFolder = value;
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('Tasks folder')
+        .setDesc('Folder where task files are stored')
+        .addText(text => text
+          .setPlaceholder('Tasks')
+          .setValue(this.plugin.settings.tasksFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.tasksFolder = value;
+            await this.plugin.saveSettings();
+          }));
+    } else {
+      // PARA folders
+      new Setting(containerEl)
+        .setName('Projects folder')
+        .setDesc('Active work with clear deadlines (PARA: Projects)')
+        .addText(text => text
+          .setPlaceholder('1. Projects')
+          .setValue(this.plugin.settings.paraProjectsFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.paraProjectsFolder = value;
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName('Areas folder')
+        .setDesc('Ongoing responsibilities without deadlines (PARA: Areas)')
+        .addText(text => text
+          .setPlaceholder('2. Areas')
+          .setValue(this.plugin.settings.paraAreasFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.paraAreasFolder = value;
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName('Resources folder')
+        .setDesc('Reference material and knowledge base (PARA: Resources)')
+        .addText(text => text
+          .setPlaceholder('3. Resources')
+          .setValue(this.plugin.settings.paraResourcesFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.paraResourcesFolder = value;
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(containerEl)
+        .setName('Archives folder')
+        .setDesc('Completed or inactive items (PARA: Archives)')
+        .addText(text => text
+          .setPlaceholder('4. Archives')
+          .setValue(this.plugin.settings.paraArchivesFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.paraArchivesFolder = value;
+            await this.plugin.saveSettings();
+          }));
+    }
 
     // Display Settings
     containerEl.createEl('h3', { text: 'Display' });
