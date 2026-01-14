@@ -1,3 +1,37 @@
+/**
+ * @fileoverview MyTasksView - Personal task list organized by due date
+ *
+ * Provides a focused view of tasks relevant to the current user,
+ * organized by date sections (Overdue, Today, Tomorrow, This Week, Later).
+ * Ideal for daily task management and planning.
+ *
+ * **Features Implemented:**
+ * - ✅ Date-based grouping (Overdue, Today, Tomorrow, This Week, Later, No Date)
+ * - ✅ Section collapse/expand
+ * - ✅ Assignee filtering (all tasks vs. assigned to me)
+ * - ✅ Pull-to-refresh gesture (mobile)
+ * - ✅ Swipe to complete (mobile)
+ * - ✅ Task completion checkboxes
+ * - ✅ Click to open task
+ *
+ * **TODO - Missing Features:**
+ * - [ ] Actual assignee detection (currently shows all tasks)
+ * - [ ] Quick reschedule (drag to different date section)
+ * - [ ] Task prioritization within sections
+ * - [ ] Subtask display and management
+ * - [ ] Time blocking (group by time of day)
+ * - [ ] Focus mode (hide all but one section)
+ * - [ ] Task notes preview
+ * - [ ] Recurring task indicators
+ *
+ * **Implementation Guide:**
+ * 1. Assignee detection: Read Obsidian user info and match against task.assignee field
+ * 2. Quick reschedule: Implement drag-drop between date sections, update dueDate
+ * 3. Time blocking: Add time-of-day sections (Morning, Afternoon, Evening)
+ *
+ * @module MyTasksView
+ */
+
 import { ItemView, WorkspaceLeaf } from 'obsidian';
 import type TimelineViewerPlugin from '../main';
 import type { Task, MyTaskItem } from '../models/types';
@@ -10,6 +44,9 @@ import {
 
 export const MY_TASKS_VIEW_TYPE = 'timeline-viewer-my-tasks';
 
+/**
+ * Date section categories for organizing tasks
+ */
 type DateSection = 'overdue' | 'today' | 'tomorrow' | 'this-week' | 'later' | 'no-date';
 
 interface TaskSection {
